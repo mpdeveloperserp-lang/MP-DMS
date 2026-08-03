@@ -374,14 +374,14 @@
           <option value="admin">Admin</option>
         </select>
       </div>
-      <div class="field"><label>Department</label>
-        <select id="regDept" required>
-          <option value="">Select department&hellip;</option>
+      <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <select id="regDept">
+          <option value="">Select department&hellip; (or leave blank)</option>
         </select>
       </div>
       <button class="btn btn-primary" type="submit" id="registerBtn">Create Account</button>
     </form>
-    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Every account can upload; the role you choose determines which approval stage you can act on.</div>
+    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Every account can upload; the role you choose determines which approval stage you can act on. First time setting this up? Register one account as <b>Admin</b> (department can stay blank), sign in, then use <b>Manage Masters</b> in the sidebar to add your Projects/Departments/Categories before anyone else registers.</div>
   </div>
 </div>
 
@@ -667,7 +667,7 @@ function handleRegister(ev){
   const pw = document.getElementById('regPassword').value;
   const role = document.getElementById('regRole').value;
   const dept = document.getElementById('regDept').value;
-  if(!role || !dept){ showAuthError('Please select a role and department.'); return false; }
+  if(!role){ showAuthError('Please select a role.'); return false; }
   const btn = document.getElementById('registerBtn');
   btn.disabled = true; btn.textContent = 'Creating account…';
   auth.createUserWithEmailAndPassword(email, pw)
