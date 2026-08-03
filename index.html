@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:,">
 <title>MP DMS &mdash; Approval Workflow Engine</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -696,6 +697,10 @@ auth.onAuthStateChanged(user => {
       const d = snap.data();
       currentUser = { uid:user.uid, email:user.email, name:d.name, role:d.role, department:d.department };
       enterApp();
+    }).catch(err => {
+      console.error('Failed to load user profile:', err);
+      showAuthError('Could not reach the database (' + err.message + '). Check your connection, confirm the Firestore rules are published, and try again.');
+      auth.signOut();
     });
   } else {
     currentUser = null;
@@ -714,7 +719,12 @@ function enterApp(){
     document.getElementById('adminNavGroup').classList.remove('hidden');
     document.getElementById('adminNavBtn').classList.remove('hidden');
   }
-  startListeners();
+  if(typeof startListeners === 'function'){
+    startListeners();
+  } else {
+    console.error('startListeners is not defined — app-workflow.js failed to load.');
+    alert('app-workflow.js failed to load, so the app can only show your login — Upload/Queue/Documents/Masters won\'t work. Check that app-workflow.js was uploaded in the same folder as index.html (exact filename, lowercase), then hard-refresh (Ctrl+Shift+R).');
+  }
 }
 function initials(name){
   return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
