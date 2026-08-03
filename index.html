@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MP DMS &mdash; Approval Workflow Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<!-- Firebase (compat SDK — simplest for a single-file, no-build app) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
+
+<style>
+  :root{
+    --navy:#1B263B;
+    --navy-dark:#111826;
+    --navy-soft:#2C3A55;
+    --teal:#14746F;
+    --teal-soft:#E4EFEE;
+    --gold:#9C7A12;
+    --gold-bright:#C9A227;
+    --gold-soft:#F6EFD9;
+    --red:#9C2B2B;
+    --red-soft:#F7E7E7;
+    --bg:#F3F4F7;
+    --card:#FFFFFF;
+    --border:#E3E6EC;
+    --text:#1E2330;
+    --text-muted:#6B7280;
+    --radius:10px;
+    --shadow:0 1px 2px rgba(20,26,41,.06), 0 8px 24px -12px rgba(20,26,41,.18);
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --display:'Space Grotesk', 'Inter', sans-serif;
+    --body:'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--body);
+    background:var(--bg);
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4{font-family:var(--display); margin:0; color:var(--navy); letter-spacing:-0.01em;}
+  button{font-family:var(--body); cursor:pointer;}
+  input,select,textarea{font-family:var(--body);}
+  :focus-visible{outline:2px solid var(--gold-bright); outline-offset:2px;}
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;}
+  }
+  .hidden{display:none !important;}
+
+  /* ---------- Login ---------- */
+  #loginScreen{
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #24304a 0%, transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, #1a3532 0%, transparent 55%),
+      var(--navy-dark);
+    padding:24px;
+  }
+  .auth-card{
+    width:100%; max-width:420px; background:var(--card); border-radius:16px;
+    padding:36px 32px; box-shadow:0 24px 60px -20px rgba(0,0,0,.5);
+  }
+  .auth-brand{display:flex; align-items:center; gap:10px; margin-bottom:22px;}
+  .auth-mark{
+    width:38px; height:38px; border-radius:8px; background:var(--navy);
+    display:flex; align-items:center; justify-content:center; color:var(--gold-bright);
+    font-family:var(--display); font-weight:700; font-size:15px; flex:none;
+    border:1px solid var(--navy-soft);
+  }
+  .auth-brand-text{line-height:1.2;}
+  .auth-brand-text b{font-family:var(--display); font-size:16px; color:var(--navy);}
+  .auth-brand-text span{display:block; font-size:11.5px; color:var(--text-muted); letter-spacing:.03em;}
+  .auth-tabs{display:flex; gap:4px; background:var(--bg); padding:4px; border-radius:9px; margin-bottom:22px;}
+  .auth-tab{flex:1; text-align:center; padding:9px 0; border:none; background:transparent; border-radius:6px; font-size:13.5px; font-weight:600; color:var(--text-muted);}
+  .auth-tab.active{background:var(--card); color:var(--navy); box-shadow:var(--shadow);}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; font-weight:600; color:var(--text-muted); margin-bottom:5px;}
+  .field input, .field select, .field textarea{
+    width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+    font-size:14px; background:#fff; color:var(--text);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--teal);}
+  .btn{
+    border:none; border-radius:8px; padding:11px 18px; font-size:14px; font-weight:600;
+    display:inline-flex; align-items:center; justify-content:center; gap:7px; white-space:nowrap;
+    transition:filter .12s ease, transform .05s ease;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:var(--navy); color:#fff; width:100%;}
+  .btn-primary:hover{filter:brightness(1.15);}
+  .btn-teal{background:var(--teal); color:#fff;}
+  .btn-teal:hover{filter:brightness(1.1);}
+  .btn-red{background:var(--red); color:#fff;}
+  .btn-red:hover{filter:brightness(1.1);}
+  .btn-ghost{background:transparent; color:var(--navy); border:1px solid var(--border);}
+  .btn-ghost:hover{background:var(--bg);}
+  .btn-gold{background:var(--gold-bright); color:#3a2c04;}
+  .btn:disabled{opacity:.55; cursor:not-allowed;}
+  .auth-error{background:var(--red-soft); color:var(--red); font-size:12.5px; padding:9px 11px; border-radius:7px; margin-bottom:14px; display:none;}
+  .auth-hint{margin-top:16px; font-size:11.5px; color:var(--text-muted); line-height:1.5;}
+
+  /* ---------- App shell ---------- */
+  #appShell{display:none; min-height:100vh;}
+  #appShell.active{display:flex;}
+  .topbar{
+    position:fixed; top:0; left:0; right:0; height:58px; background:var(--navy); z-index:40;
+    display:flex; align-items:center; justify-content:space-between; padding:0 18px 0 16px;
+    border-bottom:1px solid var(--navy-soft);
+  }
+  .topbar-left{display:flex; align-items:center; gap:10px;}
+  .topbar-right{display:flex; align-items:center; gap:14px;}
+  .top-title{color:#fff; font-family:var(--display); font-weight:600; font-size:15px;}
+  .top-title small{display:block; font-size:10px; font-weight:500; color:#9AA7C2; letter-spacing:.05em; font-family:var(--body);}
+  .icon-btn{
+    width:34px; height:34px; border-radius:8px; border:none; background:var(--navy-soft); color:#EAF0FF;
+    display:flex; align-items:center; justify-content:center; position:relative; font-size:16px;
+  }
+  .icon-btn:hover{background:#3a4a6b;}
+  .notif-dot{
+    position:absolute; top:-3px; right:-3px; min-width:16px; height:16px; padding:0 4px; border-radius:8px;
+    background:var(--gold-bright); color:#3a2c04; font-size:9.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+  }
+  .user-chip{display:flex; align-items:center; gap:9px; padding:5px 10px 5px 5px; background:var(--navy-soft); border-radius:20px;}
+  .user-avatar{
+    width:26px; height:26px; border-radius:50%; background:var(--gold-bright); color:#3a2c04;
+    font-weight:700; font-size:11.5px; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .user-meta{line-height:1.15;}
+  .user-meta b{display:block; font-size:12px; color:#fff; font-weight:600;}
+  .user-meta span{font-size:10px; color:#AEB9D1;}
+
+  .sidebar{
+    position:fixed; top:58px; bottom:0; left:0; width:212px; background:#fff; border-right:1px solid var(--border);
+    padding:16px 12px; overflow-y:auto; z-index:30;
+  }
+  .nav-group-label{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); font-weight:700; margin:14px 8px 8px;}
+  .nav-item{
+    display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:9px 10px; border-radius:8px;
+    border:none; background:transparent; color:#3E4657; font-size:13.5px; font-weight:600; margin-bottom:2px;
+  }
+  .nav-item .ic{width:18px; text-align:center; font-size:14px;}
+  .nav-item:hover{background:var(--bg);}
+  .nav-item.active{background:var(--teal-soft); color:var(--teal);}
+  .nav-badge{margin-left:auto; background:var(--gold-bright); color:#3a2c04; font-size:10px; font-weight:700; padding:1px 7px; border-radius:9px;}
+
+  .main{margin-left:212px; margin-top:58px; padding:26px 30px 60px; width:calc(100% - 212px); min-height:calc(100vh - 58px);}
+  .view{display:none;}
+  .view.active{display:block;}
+  .view-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:10px;}
+  .view-head h2{font-size:21px;}
+  .view-sub{color:var(--text-muted); font-size:13px; margin:4px 0 22px;}
+
+  .stat-row{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;}
+  .stat-card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:15px 16px; box-shadow:var(--shadow);}
+  .stat-card .num{font-family:var(--display); font-size:24px; font-weight:700; color:var(--navy);}
+  .stat-card .lbl{font-size:12px; color:var(--text-muted); margin-top:2px;}
+  .stat-card.accent-gold .num{color:var(--gold);}
+  .stat-card.accent-teal .num{color:var(--teal);}
+  .stat-card.accent-red .num{color:var(--red);}
+
+  .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);}
+  .panel{padding:22px;}
+
+  /* ---------- Upload form ---------- */
+  .upload-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; max-width:760px;}
+  .upload-grid .full{grid-column:1 / -1;}
+  .dropzone{
+    grid-column:1/-1; border:1.5px dashed var(--border); border-radius:10px; padding:26px; text-align:center;
+    background:#FAFBFC; color:var(--text-muted); font-size:13.5px; cursor:pointer;
+  }
+  .dropzone.drag{border-color:var(--teal); background:var(--teal-soft); color:var(--teal);}
+  .dropzone strong{color:var(--navy);}
+  .filepill{display:inline-flex; align-items:center; gap:8px; background:var(--teal-soft); color:var(--teal); padding:6px 12px; border-radius:20px; font-size:12.5px; font-weight:600; margin-top:10px; font-family:var(--mono);}
+  .progress-wrap{grid-column:1/-1; height:8px; background:var(--border); border-radius:6px; overflow:hidden; display:none;}
+  .progress-bar{height:100%; width:0%; background:var(--teal); transition:width .15s ease;}
+
+  /* ---------- Queue cards ---------- */
+  .queue-list{display:flex; flex-direction:column; gap:12px;}
+  .queue-card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 18px; display:flex; align-items:center; gap:16px;}
+  .queue-card.overdue{border-left:3px solid var(--red);}
+  .queue-main{flex:1; min-width:0;}
+  .queue-title-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .queue-title-row h4{font-size:14.5px; color:var(--navy);}
+  .drawing-code{font-family:var(--mono); font-size:11.5px; background:var(--bg); color:var(--navy-soft); padding:2px 7px; border-radius:5px; font-weight:600;}
+  .queue-meta{font-size:12px; color:var(--text-muted); margin-top:4px;}
+  .queue-meta b{color:var(--text);}
+  .overdue-tag{color:var(--red); font-weight:700;}
+  .step-chip-row{display:flex; gap:6px; margin-top:9px; flex-wrap:wrap;}
+  .queue-actions{display:flex; gap:8px; flex:none;}
+
+  .step-chip{
+    font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.02em;
+    display:inline-flex; align-items:center; gap:4px;
+  }
+  .step-chip.pending{background:#EEF0F4; color:#7A8394;}
+  .step-chip.active-pending{background:var(--gold-soft); color:var(--gold);}
+  .step-chip.approved{background:var(--teal-soft); color:var(--teal);}
+  .step-chip.rejected{background:var(--red-soft); color:var(--red);}
+
+  .empty-state{padding:50px 20px; text-align:center; color:var(--text-muted);}
+  .empty-state .ic{font-size:34px; margin-bottom:10px;}
+  .empty-state b{color:var(--navy); display:block; margin-bottom:4px; font-family:var(--display); font-size:15px;}
+
+  /* ---------- Documents table ---------- */
+  table{width:100%; border-collapse:collapse;}
+  thead th{
+    text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted);
+    padding:11px 14px; border-bottom:1px solid var(--border); background:#FAFBFC;
+  }
+  tbody td{padding:12px 14px; border-bottom:1px solid var(--border); font-size:13px; vertical-align:middle;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:#FAFBFC;}
+  .badge{display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px;}
+  .badge .dot{width:6px; height:6px; border-radius:50%;}
+  .badge.st-pending_review{background:var(--teal-soft); color:var(--teal);}
+  .badge.st-pending_review .dot{background:var(--teal);}
+  .badge.st-pending_approval{background:var(--gold-soft); color:var(--gold);}
+  .badge.st-pending_approval .dot{background:var(--gold-bright);}
+  .badge.st-approved{background:#E7F0E8; color:#2F6B3A;}
+  .badge.st-approved .dot{background:#3F8A4C;}
+  .badge.st-published{background:var(--navy); color:#fff;}
+  .badge.st-published .dot{background:var(--gold-bright);}
+  .badge.st-rejected{background:var(--red-soft); color:var(--red);}
+  .badge.st-rejected .dot{background:var(--red);}
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(15,20,32,.55); display:none; align-items:flex-start; justify-content:center;
+    z-index:100; padding:40px 20px; overflow-y:auto;
+  }
+  .modal-overlay.active{display:flex;}
+  .modal{background:#fff; border-radius:14px; width:100%; max-width:560px; box-shadow:0 30px 70px -20px rgba(0,0,0,.4); animation:pop .16s ease;}
+  .modal.wide{max-width:760px;}
+  @keyframes pop{from{opacity:0; transform:translateY(8px) scale(.98);} to{opacity:1; transform:translateY(0) scale(1);}}
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--border);}
+  .modal-head h3{font-size:16px;}
+  .modal-close{border:none; background:transparent; font-size:18px; color:var(--text-muted); width:30px; height:30px; border-radius:7px;}
+  .modal-close:hover{background:var(--bg);}
+  .modal-body{padding:22px; max-height:70vh; overflow-y:auto;}
+  .modal-foot{padding:16px 22px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;}
+
+  /* ---------- Detail modal: timeline & meta ---------- */
+  .detail-meta-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px 20px; margin-bottom:18px; font-size:13px;}
+  .detail-meta-grid div span{display:block; font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px;}
+  .stage-track{display:flex; align-items:flex-start; gap:0; margin:20px 0 22px;}
+  .stage-node{flex:1; text-align:center; position:relative;}
+  .stage-node .circle{
+    width:30px; height:30px; border-radius:50%; margin:0 auto 6px; display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:700; border:2px solid var(--border); background:#fff; color:var(--text-muted); position:relative; z-index:2;
+  }
+  .stage-node.done .circle{background:var(--teal); border-color:var(--teal); color:#fff;}
+  .stage-node.active .circle{background:var(--gold-soft); border-color:var(--gold-bright); color:var(--gold);}
+  .stage-node.rejected .circle{background:var(--red); border-color:var(--red); color:#fff;}
+  .stage-node .line{position:absolute; top:15px; left:-50%; width:100%; height:2px; background:var(--border); z-index:1;}
+  .stage-node:first-child .line{display:none;}
+  .stage-node.done .line, .stage-node.active .line{background:var(--teal);}
+  .stage-node .lbl{font-size:10.5px; font-weight:600; color:var(--text-muted); line-height:1.3; padding:0 4px;}
+  .stage-node.done .lbl, .stage-node.active .lbl{color:var(--navy);}
+
+  .stamp{
+    display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    border:2.5px solid currentColor; border-radius:8px; padding:6px 14px; transform:rotate(-6deg);
+    font-family:var(--display); text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:700;
+    opacity:.9;
+  }
+  .stamp.stamp-teal{color:var(--teal);}
+  .stamp.stamp-red{color:var(--red);}
+  .stamp.stamp-navy{color:var(--navy);}
+  .stamp small{font-family:var(--mono); font-size:8.5px; letter-spacing:.02em; font-weight:600; text-transform:none;}
+
+  .step-row{display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--border);}
+  .step-row:last-child{border-bottom:none;}
+  .step-status-ic{
+    width:26px; height:26px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; margin-top:2px;
+  }
+  .step-row.pending .step-status-ic{background:#EEF0F4; color:#9098A8;}
+  .step-row.active .step-status-ic{background:var(--gold-soft); color:var(--gold);}
+  .step-row.approved .step-status-ic{background:var(--teal-soft); color:var(--teal);}
+  .step-row.rejected .step-status-ic{background:var(--red-soft); color:var(--red);}
+  .step-row-body{flex:1;}
+  .step-row-body .t{font-size:13.5px; font-weight:600; color:var(--navy);}
+  .step-row-body .m{font-size:12px; color:var(--text-muted); margin-top:2px;}
+  .step-row-body .remarks{font-size:12.5px; color:var(--text); background:var(--bg); padding:7px 10px; border-radius:7px; margin-top:6px;}
+  .step-row-actions{display:flex; gap:8px; margin-top:8px;}
+  .btn-sm{padding:7px 13px; font-size:12.5px; border-radius:7px;}
+
+  .hist-item{display:flex; gap:10px; padding:8px 0; font-size:12.5px; border-bottom:1px dashed var(--border);}
+  .hist-item:last-child{border-bottom:none;}
+  .hist-item .hdot{width:6px; height:6px; border-radius:50%; background:var(--teal); margin-top:6px; flex:none;}
+  .hist-item .htime{font-family:var(--mono); font-size:10.5px; color:var(--text-muted); white-space:nowrap;}
+
+  .toast-wrap{position:fixed; top:70px; right:20px; z-index:200; display:flex; flex-direction:column; gap:8px;}
+  .toast{background:var(--navy); color:#fff; padding:11px 16px; border-radius:9px; font-size:13px; box-shadow:0 10px 30px -10px rgba(0,0,0,.4); display:flex; align-items:center; gap:8px; animation:slidein .18s ease;}
+  .toast.ok{background:var(--teal);}
+  .toast.err{background:var(--red);}
+  @keyframes slidein{from{opacity:0; transform:translateX(16px);} to{opacity:1; transform:translateX(0);}}
+
+  .notif-panel{position:fixed; top:58px; right:16px; width:340px; max-height:70vh; overflow-y:auto; background:#fff; border-radius:12px; box-shadow:0 20px 50px -15px rgba(0,0,0,.35); border:1px solid var(--border); display:none; z-index:90;}
+  .notif-panel.active{display:block;}
+  .notif-panel-head{padding:14px 16px; border-bottom:1px solid var(--border); font-weight:700; font-size:13.5px; color:var(--navy);}
+  .notif-item{padding:12px 16px; border-bottom:1px solid var(--border); font-size:12.5px; cursor:pointer;}
+  .notif-item:hover{background:var(--bg);}
+  .notif-item .nt{color:var(--text);}
+  .notif-item .ntime{color:var(--text-muted); font-size:10.5px; margin-top:3px; font-family:var(--mono);}
+  .notif-item.unread{background:#FBF8EF;}
+
+  .setup-banner{background:var(--gold-soft); border:1px solid #E9D9A6; color:#6E5309; padding:10px 14px; border-radius:9px; font-size:12.5px; margin-bottom:18px;}
+
+  @media (max-width: 880px){
+    .sidebar{width:0; padding:0; overflow:hidden; border:none;}
+    .main{margin-left:0; width:100%; padding:20px 16px 60px;}
+    .upload-grid{grid-template-columns:1fr;}
+    .stat-row{grid-template-columns:1fr 1fr;}
+    .user-meta{display:none;}
+    .detail-meta-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ LOGIN / REGISTER ============================================================ -->
+<div id="loginScreen">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="auth-mark">MP</div>
+      <div class="auth-brand-text"><b>MP Developers DMS</b><span>Approval Workflow Engine</span></div>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLoginBtn" onclick="setAuthTab('login')">Sign In</button>
+      <button class="auth-tab" id="tabRegisterBtn" onclick="setAuthTab('register')">Register</button>
+    </div>
+    <div class="auth-error" id="authError"></div>
+
+    <form id="loginForm" onsubmit="return handleLogin(event)">
+      <div class="field"><label>Email</label><input type="email" id="loginEmail" required autocomplete="username"></div>
+      <div class="field"><label>Password</label><input type="password" id="loginPassword" required autocomplete="current-password"></div>
+      <button class="btn btn-primary" type="submit" id="loginBtn">Sign In</button>
+    </form>
+
+    <form id="registerForm" class="hidden" onsubmit="return handleRegister(event)">
+      <div class="field"><label>Full name</label><input type="text" id="regName" required></div>
+      <div class="field"><label>Email</label><input type="email" id="regEmail" required autocomplete="username"></div>
+      <div class="field"><label>Password</label><input type="password" id="regPassword" minlength="6" required autocomplete="new-password"></div>
+      <div class="field">
+        <label>Role</label>
+        <select id="regRole" required>
+          <option value="">Select your role&hellip;</option>
+          <option value="project_engineer">Project Engineer (uploader)</option>
+          <option value="architect">Architect (uploader)</option>
+          <option value="site_engineer">Site Engineer (uploader)</option>
+          <option value="planning_engineer">Planning Engineer (Stage 1 reviewer)</option>
+          <option value="qa_manager">QA Manager (Stage 1 reviewer)</option>
+          <option value="project_manager">Project Manager (Stage 2 approver)</option>
+          <option value="management">Management (Stage 3 approver)</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="field"><label>Department</label>
+        <select id="regDept" required>
+          <option value="">Select department&hellip;</option>
+          <option>Engineering</option><option>Architecture</option><option>Planning</option>
+          <option>QA/QC</option><option>Project Management</option><option>Management</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit" id="registerBtn">Create Account</button>
+    </form>
+    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Every account can upload; the role you choose determines which approval stage you can act on.</div>
+  </div>
+</div>
+
+<!-- ============================================================ APP SHELL ============================================================ -->
+<div id="appShell">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="top-title">MP DMS<small>Approval Workflow Engine</small></div>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="notifBtn" onclick="toggleNotifPanel()" title="Notifications" aria-label="Notifications">
+        &#128276;<span class="notif-dot hidden" id="notifDot">0</span>
+      </button>
+      <div class="user-chip">
+        <div class="user-avatar" id="userAvatar">?</div>
+        <div class="user-meta"><b id="userName">&mdash;</b><span id="userRole">&mdash;</span></div>
+      </div>
+      <button class="icon-btn" onclick="handleLogout()" title="Sign out" aria-label="Sign out">&#10148;</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="nav-group-label">Lifecycle</div>
+    <button class="nav-item active" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
+    <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
+    <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> All Documents</button>
+    <div class="nav-group-label">Reference</div>
+    <button class="nav-item" data-view="workflowView" onclick="switchView('workflowView')"><span class="ic">&#8942;</span> Workflow Map</button>
+  </div>
+
+  <div class="main">
+
+    <!-- ---------------- UPLOAD VIEW ---------------- -->
+    <div class="view active" id="uploadView">
+      <div class="view-head"><h2>Upload Document</h2></div>
+      <div class="view-sub">New uploads enter Stage 1 (parallel Planning + QA review) automatically.</div>
+      <div class="card panel">
+        <form id="uploadForm" onsubmit="return handleUpload(event)">
+          <div class="upload-grid">
+            <div class="field full">
+              <label>File</label>
+              <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                <div id="dzText"><strong>Click to choose a file</strong> or drag and drop &mdash; PDF, DWG, image, or Office file</div>
+                <div id="filePillWrap"></div>
+              </div>
+              <input type="file" id="fileInput" class="hidden">
+            </div>
+            <div class="field"><label>Project</label>
+              <select id="fProject" required>
+                <option value="">Select project&hellip;</option>
+                <option>MP Winter</option><option>MP Merlin</option><option>MP Golden Heights</option>
+                <option>MP Pace Petals</option><option>MP Eden</option>
+              </select>
+            </div>
+            <div class="field"><label>Department</label>
+              <select id="fDepartment" required>
+                <option value="">Select department&hellip;</option>
+                <option>Engineering</option><option>Architecture</option><option>Planning</option><option>QA/QC</option>
+              </select>
+            </div>
+            <div class="field"><label>Category</label>
+              <select id="fCategory" required>
+                <option value="">Select category&hellip;</option>
+                <option>Structural Drawings</option><option>Architectural Drawings</option><option>MEP Drawings</option>
+                <option>Electrical Drawings</option><option>HVAC</option><option>Landscape</option>
+                <option>Legal Documents</option><option>BOQ</option><option>Quality Documents</option>
+              </select>
+            </div>
+            <div class="field"><label>Drawing / Document No.</label><input type="text" id="fDrawingNo" placeholder="e.g., STR-FDN-003" required></div>
+            <div class="field"><label>Revision</label><input type="text" id="fRevision" placeholder="e.g., Rev-A" required></div>
+            <div class="field full"><label>Title</label><input type="text" id="fTitle" placeholder="e.g., Foundation Plan &ndash; Tower B" required></div>
+            <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="uploadBtn">Submit for Review</button>
+              <button class="btn btn-ghost" type="reset" onclick="resetUploadForm()">Clear</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ---------------- QUEUE VIEW ---------------- -->
+    <div class="view" id="queueView">
+      <div class="view-head"><h2>My Approval Queue</h2></div>
+      <div class="view-sub" id="queueSub">Items awaiting your action, based on your role.</div>
+      <div class="stat-row" id="queueStats"></div>
+      <div class="queue-list" id="queueList">
+        <div class="empty-state"><div class="ic">&#8987;</div><b>Loading&hellip;</b></div>
+      </div>
+    </div>
+
+    <!-- ---------------- ALL DOCUMENTS VIEW ---------------- -->
+    <div class="view" id="docsView">
+      <div class="view-head"><h2>All Documents</h2></div>
+      <div class="view-sub">Every document submitted into the lifecycle. Click a row to open its approval timeline.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Drawing No.</th><th>Title</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
+          <tbody id="docsTableBody">
+            <tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- WORKFLOW MAP VIEW ---------------- -->
+    <div class="view" id="workflowView">
+      <div class="view-head"><h2>Workflow Map</h2></div>
+      <div class="view-sub">The configured approval chain every uploaded document follows.</div>
+      <div class="card panel">
+        <div class="stage-track" style="max-width:640px;">
+          <div class="stage-node done"><div class="line"></div><div class="circle">1</div><div class="lbl">Planning Review<br><span style="font-weight:400;">(parallel)</span></div></div>
+          <div class="stage-node done"><div class="line"></div><div class="circle">1</div><div class="lbl">QA Review<br><span style="font-weight:400;">(parallel)</span></div></div>
+          <div class="stage-node active"><div class="line"></div><div class="circle">2</div><div class="lbl">Project Manager<br>Approval</div></div>
+          <div class="stage-node"><div class="line"></div><div class="circle">3</div><div class="lbl">Management<br>Approval + Signature</div></div>
+        </div>
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.6; margin-top:10px;">
+          Stage 1 is parallel &mdash; Planning and QA review simultaneously. The document only advances to Stage 2 once <b>both</b> approve.
+          Stage 2 (Project Manager) and Stage 3 (Management) run sequentially. Management's approval requires a typed digital signature and immediately publishes the document.
+          A rejection at any stage returns the document to the uploader, who can submit a new revision that restarts the chain from Stage 1.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="notif-panel" id="notifPanel">
+  <div class="notif-panel-head">Notifications</div>
+  <div id="notifList"></div>
+</div>
+
+<!-- ---------------- DOCUMENT DETAIL MODAL ---------------- -->
+<div class="modal-overlay" id="detailModalOverlay">
+  <div class="modal wide">
+    <div class="modal-head"><h3 id="detailTitle">Document</h3><button class="modal-close" onclick="closeModal('detailModalOverlay')">&times;</button></div>
+    <div class="modal-body" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- ---------------- DECISION MODAL (approve/reject remarks) ---------------- -->
+<div class="modal-overlay" id="decisionModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="decisionTitle">Step Decision</h3><button class="modal-close" onclick="closeModal('decisionModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <p id="decisionDesc" style="font-size:13px; color:var(--text-muted); margin-top:0;"></p>
+      <div class="field hidden" id="signatureField">
+        <label>Type your full name to digitally sign &amp; publish</label>
+        <input type="text" id="signatureInput" placeholder="Full name">
+      </div>
+      <div class="field">
+        <label id="remarksLabel">Remarks</label>
+        <textarea id="decisionRemarks" rows="3" placeholder="Optional comments&hellip;"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('decisionModalOverlay')">Cancel</button>
+      <button class="btn" id="decisionConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- RESUBMIT MODAL ---------------- -->
+<div class="modal-overlay" id="resubmitModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Submit Revised Version</h3><button class="modal-close" onclick="closeModal('resubmitModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>New file</label>
+        <div class="dropzone" id="resubDropzone" onclick="document.getElementById('resubFileInput').click()">
+          <div id="resubDzText"><strong>Click to choose a file</strong></div>
+          <div id="resubFilePillWrap"></div>
+        </div>
+        <input type="file" id="resubFileInput" class="hidden">
+      </div>
+      <div class="field"><label>New revision label</label><input type="text" id="resubRevision" placeholder="e.g., Rev-B"></div>
+      <div class="progress-wrap" id="resubProgressWrap"><div class="progress-bar" id="resubProgressBar"></div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('resubmitModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="resubmitConfirmBtn" onclick="submitResubmission()">Submit Revised Version</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* ============================================================
+   FIREBASE CONFIG
+   Replace with your own project's config from the Firebase console
+   (Project Settings → General → Your apps → SDK setup and configuration).
+============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyDIusuptNlkiAPrrA5_dFQS6MlFgZqkXYw",
+  authDomain: "mp-developers-dms.firebaseapp.com",
+  projectId: "mp-developers-dms",
+  storageBucket: "mp-developers-dms.firebasestorage.app",
+  messagingSenderId: "443845770891",
+  appId: "1:443845770891:web:282a22a55ea9fd4feade8e",
+  measurementId: "G-QBLP2448E7"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const storage = firebase.storage();
+
+/* ============================================================
+   WORKFLOW TEMPLATE
+============================================================ */
+const ROLE_LABELS = {
+  project_engineer:'Project Engineer', architect:'Architect', site_engineer:'Site Engineer',
+  planning_engineer:'Planning Engineer', qa_manager:'QA Manager',
+  project_manager:'Project Manager', management:'Management', admin:'Admin'
+};
+const WORKFLOW_STEPS = [
+  { key:'planning_review', label:'Planning Review', role:'planning_engineer', stage:0 },
+  { key:'qa_review',       label:'QA Review',        role:'qa_manager',        stage:0 },
+  { key:'pm_approval',     label:'Project Manager Approval', role:'project_manager', stage:1 },
+  { key:'mgmt_approval',   label:'Management Approval',      role:'management',      stage:2 }
+];
+const TOTAL_STAGES = 3;
+const STAGE_LABELS = ['Stage 1 · Parallel Review', 'Stage 2 · PM Approval', 'Stage 3 · Management Approval'];
+const STATUS_LABELS = {
+  pending_review:'Pending Review', pending_approval:'Pending Approval',
+  approved:'Approved', published:'Published', rejected:'Rejected'
+};
+function freshSteps(){
+  return WORKFLOW_STEPS.map(s => ({...s, decision:'pending', decidedBy:null, decidedByName:null, decidedAt:null, remarks:null}));
+}
+
+/* ============================================================
+   STATE
+============================================================ */
+// NOTE: allDocsSnapshot, pendingDecision, and resubFile are declared in
+// app-workflow.js (they belong to logic that lives there). Declaring them
+// here too would throw a duplicate-declaration SyntaxError, since this
+// inline block and app-workflow.js share one global scope.
+let currentUser = null;      // {uid, name, email, role, department}
+let selectedFile = null;
+let activeDocId = null;      // doc currently open in detail modal
+
+/* ============================================================
+   AUTH
+============================================================ */
+function setAuthTab(tab){
+  document.getElementById('tabLoginBtn').classList.toggle('active', tab==='login');
+  document.getElementById('tabRegisterBtn').classList.toggle('active', tab==='register');
+  document.getElementById('loginForm').classList.toggle('hidden', tab!=='login');
+  document.getElementById('registerForm').classList.toggle('hidden', tab!=='register');
+  hideAuthError();
+}
+function showAuthError(msg){ const e=document.getElementById('authError'); e.textContent=msg; e.style.display='block'; }
+function hideAuthError(){ document.getElementById('authError').style.display='none'; }
+
+function handleLogin(ev){
+  ev.preventDefault();
+  hideAuthError();
+  const email = document.getElementById('loginEmail').value.trim();
+  const pw = document.getElementById('loginPassword').value;
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  auth.signInWithEmailAndPassword(email, pw)
+    .catch(err => { showAuthError(friendlyAuthError(err)); })
+    .finally(() => { btn.disabled=false; btn.textContent='Sign In'; });
+  return false;
+}
+
+function handleRegister(ev){
+  ev.preventDefault();
+  hideAuthError();
+  const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const pw = document.getElementById('regPassword').value;
+  const role = document.getElementById('regRole').value;
+  const dept = document.getElementById('regDept').value;
+  if(!role || !dept){ showAuthError('Please select a role and department.'); return false; }
+  const btn = document.getElementById('registerBtn');
+  btn.disabled = true; btn.textContent = 'Creating account…';
+  auth.createUserWithEmailAndPassword(email, pw)
+    .then(cred => db.collection('users').doc(cred.user.uid).set({
+      name, email, role, department: dept, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }))
+    .catch(err => { showAuthError(friendlyAuthError(err)); })
+    .finally(() => { btn.disabled=false; btn.textContent='Create Account'; });
+  return false;
+}
+
+function friendlyAuthError(err){
+  const map = {
+    'auth/email-already-in-use':'That email is already registered — try signing in instead.',
+    'auth/invalid-email':'That email address looks invalid.',
+    'auth/weak-password':'Password should be at least 6 characters.',
+    'auth/wrong-password':'Incorrect password.',
+    'auth/user-not-found':'No account found with that email.',
+    'auth/invalid-credential':'Incorrect email or password.'
+  };
+  return map[err.code] || err.message;
+}
+
+function handleLogout(){ auth.signOut(); }
+
+auth.onAuthStateChanged(user => {
+  if(user){
+    db.collection('users').doc(user.uid).get().then(snap => {
+      if(!snap.exists){
+        showAuthError('Your account has no profile yet — please contact an admin, or register again with a different email.');
+        auth.signOut();
+        return;
+      }
+      const d = snap.data();
+      currentUser = { uid:user.uid, email:user.email, name:d.name, role:d.role, department:d.department };
+      enterApp();
+    });
+  } else {
+    currentUser = null;
+    document.getElementById('appShell').classList.remove('active');
+    document.getElementById('loginScreen').style.display = 'flex';
+  }
+});
+
+function enterApp(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appShell').classList.add('active');
+  document.getElementById('userAvatar').textContent = initials(currentUser.name);
+  document.getElementById('userName').textContent = currentUser.name;
+  document.getElementById('userRole').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
+  startListeners();
+}
+function initials(name){
+  return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+}
+
+/* ============================================================
+   NAVIGATION
+============================================================ */
+function switchView(viewId){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(viewId).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view===viewId));
+  document.getElementById('notifPanel').classList.remove('active');
+}
+
+/* ============================================================
+   TOASTS
+============================================================ */
+function toast(msg, type){
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' '+type : '');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+/* ============================================================
+   MODALS
+============================================================ */
+function openModal(id){ document.getElementById(id).classList.add('active'); }
+function closeModal(id){ document.getElementById(id).classList.remove('active'); }
+document.querySelectorAll('.modal-overlay').forEach(ov => {
+  ov.addEventListener('click', e => { if(e.target===ov) ov.classList.remove('active'); });
+});
+
+/* ============================================================
+   UPLOAD
+============================================================ */
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if(e.dataTransfer.files[0]) setSelectedFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if(e.target.files[0]) setSelectedFile(e.target.files[0]); });
+function setSelectedFile(file){
+  selectedFile = file;
+  document.getElementById('filePillWrap').innerHTML =
+    `<div class="filepill">📎 ${escapeHtml(file.name)} <span style="opacity:.7;">(${(file.size/1024).toFixed(0)} KB)</span></div>`;
+}
+function resetUploadForm(){
+  selectedFile = null;
+  document.getElementById('filePillWrap').innerHTML = '';
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('progressBar').style.width = '0%';
+}
+
+function handleUpload(ev){
+  ev.preventDefault();
+  if(!selectedFile){ toast('Please choose a file to upload.', 'err'); return false; }
+  const meta = {
+    project: document.getElementById('fProject').value,
+    department: document.getElementById('fDepartment').value,
+    category: document.getElementById('fCategory').value,
+    drawingNumber: document.getElementById('fDrawingNo').value.trim(),
+    revision: document.getElementById('fRevision').value.trim(),
+    title: document.getElementById('fTitle').value.trim()
+  };
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+
+  const docRef = db.collection('documents').doc();
+  const versionRef = docRef.collection('versions').doc();
+  const storagePath = `documents/${docRef.id}/${versionRef.id}/${selectedFile.name}`;
+  const task = storage.ref(storagePath).put(selectedFile);
+
+  document.getElementById('progressWrap').style.display = 'block';
+  task.on('state_changed',
+    snap => {
+      const pct = (snap.bytesTransferred / snap.totalBytes) * 100;
+      document.getElementById('progressBar').style.width = pct + '%';
+    },
+    err => {
+      toast('Upload failed: ' + err.message, 'err');
+      btn.disabled = false; btn.textContent = 'Submit for Review';
+    },
+    () => {
+      task.snapshot.ref.getDownloadURL().then(url => {
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const versionData = {
+          versionNo: 1, revision: meta.revision,
+          fileName: selectedFile.name, fileURL: url, filePath: storagePath,
+          uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
+          status: 'pending_review', currentStage: 0, steps: freshSteps(),
+          signedBy: null, signedAt: null, supersededBy: null,
+          docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
+        };
+        const batch = db.batch();
+        batch.set(docRef, {
+          title: meta.title, drawingNumber: meta.drawingNumber, project: meta.project,
+          department: meta.department, category: meta.category,
+          currentVersionNo: 1, currentVersionId: versionRef.id, status: 'pending_review',
+          createdBy: currentUser.uid, createdByName: currentUser.name,
+          createdAt: now, updatedAt: now
+        });
+        batch.set(versionRef, versionData);
+        batch.set(versionRef.collection('history').doc(), {
+          action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
+          timestamp: now, remarks: null, toStatus:'pending_review'
+        });
+        batch.commit().then(() => {
+          notifyRoles(['planning_engineer','qa_manager'],
+            `${meta.drawingNumber} — ${meta.title} needs your Stage 1 review.`, docRef.id);
+          toast('Document uploaded and sent for review.', 'ok');
+          document.getElementById('uploadForm').reset();
+          resetUploadForm();
+          switchView('queueView');
+          document.querySelector('.nav-item[data-view="queueView"]').classList.add('active');
+          document.querySelector('.nav-item[data-view="uploadView"]').classList.remove('active');
+        });
+      });
+    }
+  );
+  return false;
+}
+</script>
+<script src="app-workflow.js"></script>
+</body>
+</html>
