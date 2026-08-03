@@ -164,6 +164,16 @@
   .stat-card.accent-teal .num{color:var(--teal);}
   .stat-card.accent-red .num{color:var(--red);}
 
+  .master-card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; display:flex; flex-direction:column;}
+  .master-card h4{font-size:14px; margin-bottom:10px;}
+  .master-add-row{display:flex; gap:6px; margin-bottom:12px;}
+  .master-add-row input{flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px;}
+  .master-list{display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto;}
+  .master-item{display:flex; align-items:center; justify-content:space-between; background:var(--bg); padding:7px 10px; border-radius:7px; font-size:13px;}
+  .master-item button{border:none; background:transparent; color:var(--red); font-size:15px; line-height:1; padding:2px 4px; border-radius:5px;}
+  .master-item button:hover{background:var(--red-soft);}
+  .master-empty{font-size:12.5px; color:var(--text-muted); text-align:center; padding:14px 4px;}
+
   .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);}
   .panel{padding:22px;}
 
@@ -171,6 +181,7 @@
   .upload-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; max-width:760px;}
   .upload-grid .full{grid-column:1 / -1;}
   .dropzone{
+    display:block;
     grid-column:1/-1; border:1.5px dashed var(--border); border-radius:10px; padding:26px; text-align:center;
     background:#FAFBFC; color:var(--text-muted); font-size:13.5px; cursor:pointer;
   }
@@ -365,8 +376,6 @@
       <div class="field"><label>Department</label>
         <select id="regDept" required>
           <option value="">Select department&hellip;</option>
-          <option>Engineering</option><option>Architecture</option><option>Planning</option>
-          <option>QA/QC</option><option>Project Management</option><option>Management</option>
         </select>
       </div>
       <button class="btn btn-primary" type="submit" id="registerBtn">Create Account</button>
@@ -400,6 +409,8 @@
     <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> All Documents</button>
     <div class="nav-group-label">Reference</div>
     <button class="nav-item" data-view="workflowView" onclick="switchView('workflowView')"><span class="ic">&#8942;</span> Workflow Map</button>
+    <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
+    <button class="nav-item hidden" id="adminNavBtn" data-view="mastersView" onclick="switchView('mastersView')"><span class="ic">&#9881;</span> Manage Masters</button>
   </div>
 
   <div class="main">
@@ -413,31 +424,25 @@
           <div class="upload-grid">
             <div class="field full">
               <label>File</label>
-              <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+              <label class="dropzone" id="dropzone" for="fileInput">
                 <div id="dzText"><strong>Click to choose a file</strong> or drag and drop &mdash; PDF, DWG, image, or Office file</div>
                 <div id="filePillWrap"></div>
-              </div>
+              </label>
               <input type="file" id="fileInput" class="hidden">
             </div>
             <div class="field"><label>Project</label>
               <select id="fProject" required>
                 <option value="">Select project&hellip;</option>
-                <option>MP Winter</option><option>MP Merlin</option><option>MP Golden Heights</option>
-                <option>MP Pace Petals</option><option>MP Eden</option>
               </select>
             </div>
             <div class="field"><label>Department</label>
               <select id="fDepartment" required>
                 <option value="">Select department&hellip;</option>
-                <option>Engineering</option><option>Architecture</option><option>Planning</option><option>QA/QC</option>
               </select>
             </div>
             <div class="field"><label>Category</label>
               <select id="fCategory" required>
                 <option value="">Select category&hellip;</option>
-                <option>Structural Drawings</option><option>Architectural Drawings</option><option>MEP Drawings</option>
-                <option>Electrical Drawings</option><option>HVAC</option><option>Landscape</option>
-                <option>Legal Documents</option><option>BOQ</option><option>Quality Documents</option>
               </select>
             </div>
             <div class="field"><label>Drawing / Document No.</label><input type="text" id="fDrawingNo" placeholder="e.g., STR-FDN-003" required></div>
@@ -496,6 +501,13 @@
       </div>
     </div>
 
+    <!-- ---------------- MANAGE MASTERS VIEW (admin only) ---------------- -->
+    <div class="view" id="mastersView">
+      <div class="view-head"><h2>Manage Masters</h2></div>
+      <div class="view-sub">These lists feed the Project / Department / Category dropdowns on Upload and Registration. Admin only.</div>
+      <div class="stat-row" style="grid-template-columns:repeat(3,1fr);" id="mastersGrid"></div>
+    </div>
+
   </div>
 </div>
 
@@ -540,10 +552,10 @@
     <div class="modal-head"><h3>Submit Revised Version</h3><button class="modal-close" onclick="closeModal('resubmitModalOverlay')">&times;</button></div>
     <div class="modal-body">
       <div class="field"><label>New file</label>
-        <div class="dropzone" id="resubDropzone" onclick="document.getElementById('resubFileInput').click()">
+        <label class="dropzone" id="resubDropzone" for="resubFileInput">
           <div id="resubDzText"><strong>Click to choose a file</strong></div>
           <div id="resubFilePillWrap"></div>
-        </div>
+        </label>
         <input type="file" id="resubFileInput" class="hidden">
       </div>
       <div class="field"><label>New revision label</label><input type="text" id="resubRevision" placeholder="e.g., Rev-B"></div>
@@ -698,6 +710,10 @@ function enterApp(){
   document.getElementById('userAvatar').textContent = initials(currentUser.name);
   document.getElementById('userName').textContent = currentUser.name;
   document.getElementById('userRole').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
+  if(currentUser.role === 'admin'){
+    document.getElementById('adminNavGroup').classList.remove('hidden');
+    document.getElementById('adminNavBtn').classList.remove('hidden');
+  }
   startListeners();
 }
 function initials(name){
@@ -749,11 +765,13 @@ dropzone.addEventListener('drop', e => {
 fileInput.addEventListener('change', e => { if(e.target.files[0]) setSelectedFile(e.target.files[0]); });
 function setSelectedFile(file){
   selectedFile = file;
+  document.getElementById('dzText').classList.add('hidden');
   document.getElementById('filePillWrap').innerHTML =
-    `<div class="filepill">📎 ${escapeHtml(file.name)} <span style="opacity:.7;">(${(file.size/1024).toFixed(0)} KB)</span></div>`;
+    `<div class="filepill">&#128206; ${escapeHtml(file.name)} <span style="opacity:.7;">(${(file.size/1024).toFixed(0)} KB)</span></div><div style="margin-top:6px; font-size:11.5px;">Click to choose a different file</div>`;
 }
 function resetUploadForm(){
   selectedFile = null;
+  document.getElementById('dzText').classList.remove('hidden');
   document.getElementById('filePillWrap').innerHTML = '';
   document.getElementById('progressWrap').style.display = 'none';
   document.getElementById('progressBar').style.width = '0%';
