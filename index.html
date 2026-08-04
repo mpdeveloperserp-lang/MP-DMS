@@ -159,6 +159,9 @@
 
   .stat-row{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;}
   .stat-card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:15px 16px; box-shadow:var(--shadow);}
+  .stat-card.clickable{cursor:pointer; transition:transform .08s ease, box-shadow .08s ease;}
+  .stat-card.clickable:hover{transform:translateY(-1px); box-shadow:0 4px 14px -6px rgba(20,26,41,.25);}
+  .stat-card.stat-active{border-color:var(--red); background:var(--red-soft);}
   .stat-card .num{font-family:var(--display); font-size:24px; font-weight:700; color:var(--navy);}
   .stat-card .lbl{font-size:12px; color:var(--text-muted); margin-top:2px;}
   .stat-card.accent-gold .num{color:var(--gold);}
@@ -470,6 +473,7 @@
           <div class="field" style="margin-bottom:0;"><label>Project</label><select id="filterProject" onchange="applyDocFilters()"><option value="">All projects</option></select></div>
           <div class="field" style="margin-bottom:0;"><label>Department</label><select id="filterDepartment" onchange="applyDocFilters()"><option value="">All departments</option></select></div>
           <div class="field" style="margin-bottom:0;"><label>Category</label><select id="filterCategory" onchange="applyDocFilters()"><option value="">All categories</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>Status</label><select id="filterStatus" onchange="applyDocFilters()"><option value="">All statuses</option></select></div>
           <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearDocFilters()">Clear filters</button>
         </div>
       </div>
@@ -742,6 +746,7 @@ auth.onAuthStateChanged(user => {
     if(typeof stopSessionListeners === 'function') stopSessionListeners();
     document.getElementById('appShell').classList.remove('active');
     document.getElementById('loginScreen').style.display = 'flex';
+    history.replaceState(null, '', location.pathname + location.search);
   }
 });
 
@@ -764,6 +769,9 @@ function enterApp(){
     console.error('startListeners is not defined — app-workflow.js failed to load.');
     alert('app-workflow.js failed to load, so the app can only show your login — Upload/Queue/Documents/Masters won\'t work. Check that app-workflow.js was uploaded in the same folder as index.html (exact filename, lowercase), then hard-refresh (Ctrl+Shift+R).');
   }
+  const startView = (location.hash && document.getElementById(location.hash.slice(1))) ? location.hash.slice(1) : 'uploadView';
+  history.replaceState({ view: startView }, '', '#' + startView);
+  switchView(startView, { skipHistory: true });
 }
 function initials(name){
   return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
@@ -805,13 +813,29 @@ function loadUserProfile(uid){
 
 /* ============================================================
    NAVIGATION
+   Uses the History API so the browser's Back/Forward buttons move between
+   views inside the app instead of leaving it entirely — a plain SPA with
+   no routing has nothing for Back to return to, so it falls through to
+   whatever page the browser had open before this one.
 ============================================================ */
-function switchView(viewId){
+function switchView(viewId, opts){
+  opts = opts || {};
+  const target = document.getElementById(viewId);
+  if(!target) return;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(viewId).classList.add('active');
+  target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view===viewId));
   document.getElementById('notifPanel').classList.remove('active');
+  if(!opts.skipHistory){
+    history.pushState({ view: viewId }, '', '#' + viewId);
+  }
 }
+
+window.addEventListener('popstate', e => {
+  if(!document.getElementById('appShell').classList.contains('active')) return; // not logged in yet
+  const viewId = (e.state && e.state.view) || (location.hash ? location.hash.slice(1) : 'uploadView');
+  if(document.getElementById(viewId)) switchView(viewId, { skipHistory: true });
+});
 
 /* ============================================================
    TOASTS
