@@ -589,13 +589,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
-// Some corporate networks, proxies, and antivirus software with SSL
-// inspection block Firestore's default streaming connection while leaving
-// normal HTTPS traffic untouched — this shows up as "client is offline"
-// errors even though everything else (including Auth) works fine.
-// experimentalAutoDetectLongPolling falls back to plain long-polling only
-// when it detects streaming isn't working, so it's safe to always leave on.
-db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
 const storage = firebase.storage();
 
 /* ============================================================
