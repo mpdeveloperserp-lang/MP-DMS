@@ -5,6 +5,15 @@ function escapeHtml(str){
   if(str===undefined || str===null) return '';
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// For embedding admin-typed text (workflow step labels, etc.) as a
+// single-quoted JS string literal inside an inline onclick="" attribute —
+// escapes backslashes/quotes so labels containing them don't break the
+// generated markup.
+function escapeJs(str){
+  return String(str == null ? '' : str)
+    .replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 function fmtDate(ts){
   const ms = ts && ts.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : null);
   if(!ms) return '—';
@@ -143,6 +152,8 @@ function renderQueue(){
   }
   list.innerHTML = mine.map(v => {
     const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && (s.role === currentUser.role || currentUser.role === 'admin'));
+    const maxStage = Math.max(...v.steps.map(s => s.stage));
+    const isFinal = myStep.stage === maxStage;
     const overdue = isOverdue(v);
     const chips = v.steps.map(s => {
       let cls = 'pending';
@@ -158,8 +169,8 @@ function renderQueue(){
         <div class="step-chip-row">${chips}</div>
       </div>
       <div class="queue-actions">
-        <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','approved')">Approve</button>
-        <button class="btn btn-red btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','rejected')">Reject</button>
+        <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','approved','${escapeJs(myStep.label)}',${isFinal})">Approve</button>
+        <button class="btn btn-red btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','rejected','${escapeJs(myStep.label)}',${isFinal})">Reject</button>
         <button class="btn btn-ghost btn-sm" onclick="openDocumentDetail('${v.docId}')">Details</button>
       </div>
     </div>`;
@@ -181,13 +192,37 @@ function listenAllDocuments(){
   });
   activeSessionUnsubs.push(unsub);
 }
+let docFilters = { project: '', department: '', category: '' };
+function applyDocFilters(){
+  docFilters.project = document.getElementById('filterProject').value;
+  docFilters.department = document.getElementById('filterDepartment').value;
+  docFilters.category = document.getElementById('filterCategory').value;
+  renderDocsTable();
+}
+function clearDocFilters(){
+  docFilters = { project: '', department: '', category: '' };
+  document.getElementById('filterProject').value = '';
+  document.getElementById('filterDepartment').value = '';
+  document.getElementById('filterCategory').value = '';
+  renderDocsTable();
+}
+
 function renderDocsTable(){
   const body = document.getElementById('docsTableBody');
+  const filtered = allDocsSnapshot.filter(d =>
+    (!docFilters.project || d.project === docFilters.project) &&
+    (!docFilters.department || d.department === docFilters.department) &&
+    (!docFilters.category || d.category === docFilters.category)
+  );
   if(allDocsSnapshot.length === 0){
     body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128193;</div><b>No documents yet</b><div>Upload the first one from the Upload Document tab.</div></div></td></tr>`;
     return;
   }
-  body.innerHTML = allDocsSnapshot.map(d => `
+  if(filtered.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128269;</div><b>No documents match these filters</b><div><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="clearDocFilters()">Clear filters</button></div></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(d => `
     <tr onclick="openDocumentDetail('${d.id}')">
       <td><span class="drawing-code">${escapeHtml(d.drawingNumber||'—')}</span></td>
       <td>${escapeHtml(d.title||'—')}</td>
@@ -223,21 +258,28 @@ function openDocumentDetail(docId){
 
 function renderDetail(docData, versions, latest, history){
   const canResubmit = latest.status === 'rejected' && (currentUser.uid === docData.createdBy || currentUser.role === 'admin');
+  const maxStage = Math.max(...latest.steps.map(s => s.stage));
 
-  const stageNodes = WORKFLOW_STEPS.map(s => {
-    const st = latest.steps.find(x => x.key === s.key);
+  // Group this document's OWN steps by stage (not the live global config —
+  // an admin may have reconfigured the workflow since this document was
+  // uploaded; this document keeps the shape it was created with).
+  const stageNumbers = [...new Set(latest.steps.map(s => s.stage))].sort((a,b) => a-b);
+  const stageNodes = stageNumbers.map(stageNum => {
+    const stepsInStage = latest.steps.filter(s => s.stage === stageNum);
+    const label = stepsInStage.map(s => s.label).join(' + ');
     let cls = 'pending';
-    if(st.decision === 'approved') cls = 'done';
-    else if(st.decision === 'rejected') cls = 'rejected';
-    else if(latest.status !== 'rejected' && s.stage === latest.currentStage) cls = 'active';
-    const icon = cls === 'done' ? '&#10003;' : (cls === 'rejected' ? '&#10007;' : (s.stage+1));
-    return `<div class="stage-node ${cls}"><div class="line"></div><div class="circle">${icon}</div><div class="lbl">${escapeHtml(s.label)}</div></div>`;
+    if(stepsInStage.every(s => s.decision === 'approved')) cls = 'done';
+    else if(stepsInStage.some(s => s.decision === 'rejected')) cls = 'rejected';
+    else if(latest.status !== 'rejected' && stageNum === latest.currentStage) cls = 'active';
+    const icon = cls === 'done' ? '&#10003;' : (cls === 'rejected' ? '&#10007;' : (stageNum+1));
+    return `<div class="stage-node ${cls}"><div class="line"></div><div class="circle">${icon}</div><div class="lbl">${escapeHtml(label)}</div></div>`;
   }).join('');
 
   const stepRows = latest.steps.map(s => {
     let rowCls = s.decision !== 'pending' ? s.decision : (latest.status !== 'rejected' && s.stage === latest.currentStage ? 'active' : 'pending');
     const canAct = latest.status !== 'rejected' && latest.status !== 'published' && s.decision === 'pending' &&
       s.stage === latest.currentStage && (s.role === currentUser.role || currentUser.role === 'admin');
+    const isFinal = s.stage === maxStage;
     const icon = s.decision === 'approved' ? '&#10003;' : s.decision === 'rejected' ? '&#10007;' : (rowCls === 'active' ? '&#8987;' : '&hellip;');
     let extra;
     if(s.decision !== 'pending'){
@@ -247,8 +289,8 @@ function renderDetail(docData, versions, latest, history){
       extra = `<div class="m">Assigned to ${escapeHtml(ROLE_LABELS[s.role]||s.role)}${currentUser.role==='admin'?' <span style="color:var(--gold);">(admin override available)</span>':''}</div>`;
     }
     const actions = canAct ? `<div class="step-row-actions">
-        <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${activeDocId}','${latest.id}','${s.key}','approved')">Approve</button>
-        <button class="btn btn-red btn-sm" onclick="openDecisionModal('${activeDocId}','${latest.id}','${s.key}','rejected')">Reject</button>
+        <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${activeDocId}','${latest.id}','${s.key}','approved','${escapeJs(s.label)}',${isFinal})">Approve</button>
+        <button class="btn btn-red btn-sm" onclick="openDecisionModal('${activeDocId}','${latest.id}','${s.key}','rejected','${escapeJs(s.label)}',${isFinal})">Reject</button>
       </div>` : '';
     return `<div class="step-row ${rowCls}">
       <div class="step-status-ic">${icon}</div>
@@ -296,12 +338,10 @@ function renderDetail(docData, versions, latest, history){
    APPROVE / REJECT DECISION MODAL
 ============================================================ */
 let pendingDecision = null;
-function openDecisionModal(docId, versionId, stepKey, decision){
+function openDecisionModal(docId, versionId, stepKey, decision, stepLabel, isFinal){
   pendingDecision = { docId, versionId, stepKey, decision };
-  const step = WORKFLOW_STEPS.find(s => s.key === stepKey);
-  const isFinal = step.stage === TOTAL_STAGES - 1;
 
-  document.getElementById('decisionTitle').textContent = (decision === 'approved' ? 'Approve — ' : 'Reject — ') + step.label;
+  document.getElementById('decisionTitle').textContent = (decision === 'approved' ? 'Approve — ' : 'Reject — ') + stepLabel;
   document.getElementById('decisionDesc').textContent = decision === 'approved'
     ? 'Confirm your decision for this step.'
     : 'Explain why this document is being rejected — the uploader will see this and be notified.';
@@ -319,6 +359,7 @@ function openDecisionModal(docId, versionId, stepKey, decision){
   const btn = document.getElementById('decisionConfirmBtn');
   btn.className = 'btn ' + (decision === 'approved' ? 'btn-teal' : 'btn-red');
   btn.textContent = decision === 'approved' ? (isFinal ? 'Approve & Publish' : 'Approve') : 'Reject';
+  btn.dataset.isFinal = isFinal ? '1' : '';
   btn.onclick = confirmDecision;
   openModal('decisionModalOverlay');
 }
@@ -326,8 +367,7 @@ function openDecisionModal(docId, versionId, stepKey, decision){
 function confirmDecision(){
   const remarks = document.getElementById('decisionRemarks').value.trim();
   const { docId, versionId, stepKey, decision } = pendingDecision;
-  const step = WORKFLOW_STEPS.find(s => s.key === stepKey);
-  const isFinal = step.stage === TOTAL_STAGES - 1;
+  const isFinal = document.getElementById('decisionConfirmBtn').dataset.isFinal === '1';
 
   if(decision === 'rejected' && !remarks){ toast('Please provide a reason for rejection.', 'err'); return; }
   let signature = null;
@@ -353,6 +393,12 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
     const step = steps[idx];
     if(step.decision !== 'pending' || step.stage !== v.currentStage) throw new Error('This step is no longer actionable.');
 
+    // Finality is determined from THIS document's own frozen steps, not the
+    // live global workflow config — if an admin has since reconfigured the
+    // workflow (added/removed stages), documents already in flight must
+    // keep behaving exactly as they did when they were uploaded.
+    const maxStageForThisDoc = Math.max(...steps.map(s => s.stage));
+
     const ts = firebase.firestore.Timestamp.now();
     step.decision = decision;
     step.decidedBy = currentUser.uid;
@@ -367,7 +413,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
       const stageSteps = steps.filter(s => s.stage === v.currentStage);
       if(stageSteps.every(s => s.decision === 'approved')){
         newStage = v.currentStage + 1;
-        if(newStage >= TOTAL_STAGES){ newStatus = 'published'; published = true; }
+        if(newStage > maxStageForThisDoc){ newStatus = 'published'; published = true; }
         else newStatus = 'pending_approval';
       }
     }
@@ -381,7 +427,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
       actor: currentUser.uid, actorName: currentUser.name, timestamp: ts,
       remarks: remarks || null, toStatus: newStatus
     });
-    return { newStatus, newStage, published, docTitle: v.docTitle, docDrawingNumber: v.docDrawingNumber, uploadedBy: v.uploadedBy, decision };
+    return { newStatus, newStage, published, steps, docTitle: v.docTitle, docDrawingNumber: v.docDrawingNumber, uploadedBy: v.uploadedBy, decision };
   })).then(result => {
     if(result.decision === 'rejected'){
       notifyUser(result.uploadedBy, `${result.docDrawingNumber} — ${result.docTitle} was rejected. See remarks and resubmit.`, docId);
@@ -390,7 +436,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
       notifyUser(result.uploadedBy, `${result.docDrawingNumber} — ${result.docTitle} has been approved and published.`, docId);
       toast('Approved, signed, and published.', 'ok');
     } else if(result.newStatus === 'pending_approval'){
-      const nextRoles = WORKFLOW_STEPS.filter(s => s.stage === result.newStage).map(s => s.role);
+      const nextRoles = result.steps.filter(s => s.stage === result.newStage).map(s => s.role);
       notifyRoles(nextRoles, `${result.docDrawingNumber} — ${result.docTitle} is ready for your approval.`, docId);
       toast('Step approved — document advanced to the next stage.', 'ok');
     } else {
@@ -466,7 +512,7 @@ function submitResubmission(){
             action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null, toStatus: 'pending_review'
           });
           batch.commit().then(() => {
-            notifyRoles(['planning_engineer','qa_manager'], `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs Stage 1 review.`, activeDocId);
+            notifyRoles(WORKFLOW_STEPS.filter(s => s.stage === 0).map(s => s.role), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);
             toast('Revised version submitted for review.', 'ok');
             closeModal('resubmitModalOverlay');
             btn.disabled = false; btn.textContent = 'Submit Revised Version';
@@ -482,22 +528,28 @@ function submitResubmission(){
    MASTER DATA — Projects, Departments, Categories
    Public read (see firestore.rules) so the registration screen can show
    department options before anyone is signed in; admin-only write.
+   Each entry can have sub-items nested under it (parentId), one level deep
+   — e.g. a Category can have Document Types under it, a Project can have
+   Sub-Projects/Towers. Only top-level entries feed the Upload form's
+   dropdowns; sub-items are an organizational reference for now.
 ============================================================ */
 const MASTER_TYPES = [
-  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject'],
+  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'] },
-  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','regDept'],
+  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment'],
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'] },
-  { key: 'categoryMasters',   label: 'Categories',  singular: 'category',   selects: ['fCategory'],
+  { key: 'categoryMasters',   label: 'Categories',  singular: 'category',   selects: ['fCategory','filterCategory'],
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'] }
 ];
 let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [] };
+let expandedMasterItems = { projectMasters: new Set(), departmentMasters: new Set(), categoryMasters: new Set() };
 
 function listenMasters(){
   MASTER_TYPES.forEach(mt => {
     db.collection(mt.key).orderBy('name').onSnapshot(snap => {
       mastersData[mt.key] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      mt.selects.forEach(selId => populateSelect(selId, mastersData[mt.key]));
+      const topLevel = mastersData[mt.key].filter(it => !it.parentId);
+      mt.selects.forEach(selId => populateSelect(selId, topLevel));
       if(currentUser && currentUser.role === 'admin') renderMastersView();
     }, err => console.error(mt.key + ' listener:', err));
   });
@@ -516,9 +568,10 @@ function renderMastersView(){
   const grid = document.getElementById('mastersGrid');
   if(!grid) return;
   grid.innerHTML = MASTER_TYPES.map(mt => {
-    const items = mastersData[mt.key];
-    const listHtml = items.length
-      ? items.map(it => `<div class="master-item"><span>${escapeHtml(it.name)}</span><button onclick="removeMasterEntry('${mt.key}','${it.id}')" title="Remove">&times;</button></div>`).join('')
+    const all = mastersData[mt.key];
+    const topLevel = all.filter(it => !it.parentId);
+    const listHtml = topLevel.length
+      ? topLevel.map(it => renderMasterItemRow(mt, it, all)).join('')
       : `<div class="master-empty">No entries yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedMasterDefaults('${mt.key}')">Load starter list (${mt.starter.length})</button></div>`;
     return `<div class="master-card">
       <h4>${mt.label}</h4>
@@ -531,30 +584,298 @@ function renderMastersView(){
   }).join('');
 }
 
+function renderMasterItemRow(mt, item, all){
+  const children = all.filter(it => it.parentId === item.id);
+  const isOpen = expandedMasterItems[mt.key].has(item.id);
+  const chevron = isOpen ? '&#9662;' : '&#9656;';
+  const childrenHtml = isOpen ? `
+    <div class="master-sublist">
+      ${children.map(c => `<div class="master-item master-subitem"><span>${escapeHtml(c.name)}</span><button onclick="removeMasterEntry('${mt.key}','${c.id}')" title="Remove">&times;</button></div>`).join('')}
+      <div class="master-add-row master-sub-add-row">
+        <input type="text" id="newsub_${mt.key}_${item.id}" placeholder="Add sub-item&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addSubMasterEntry('${mt.key}','${item.id}');}">
+        <button class="btn btn-ghost btn-sm" onclick="addSubMasterEntry('${mt.key}','${item.id}')">Add</button>
+      </div>
+    </div>` : '';
+  return `<div class="master-item-wrap">
+    <div class="master-item">
+      <span onclick="toggleMasterExpand('${mt.key}','${item.id}')" style="cursor:pointer; display:flex; align-items:center; gap:6px; flex:1;">
+        <span class="master-chevron">${chevron}</span>${escapeHtml(item.name)}${children.length ? `<span class="master-subcount">${children.length}</span>` : ''}
+      </span>
+      <button onclick="removeMasterEntry('${mt.key}','${item.id}')" title="Remove">&times;</button>
+    </div>
+    ${childrenHtml}
+  </div>`;
+}
+
+function toggleMasterExpand(typeKey, itemId){
+  const set = expandedMasterItems[typeKey];
+  if(set.has(itemId)) set.delete(itemId); else set.add(itemId);
+  renderMastersView();
+}
+
 function addMasterEntry(typeKey){
   const input = document.getElementById('new_' + typeKey);
   const name = input.value.trim();
   if(!name) return;
-  const existing = mastersData[typeKey].some(it => it.name.toLowerCase() === name.toLowerCase());
+  const existing = mastersData[typeKey].some(it => !it.parentId && it.name.toLowerCase() === name.toLowerCase());
   if(existing){ toast('That entry already exists.', 'err'); return; }
-  db.collection(typeKey).add({ name, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+  db.collection(typeKey).add({ name, parentId: null, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => { input.value = ''; toast('Added.', 'ok'); })
+    .catch(err => toast('Could not add: ' + err.message, 'err'));
+}
+function addSubMasterEntry(typeKey, parentId){
+  const input = document.getElementById(`newsub_${typeKey}_${parentId}`);
+  const name = input.value.trim();
+  if(!name) return;
+  const existing = mastersData[typeKey].some(it => it.parentId === parentId && it.name.toLowerCase() === name.toLowerCase());
+  if(existing){ toast('That sub-item already exists.', 'err'); return; }
+  db.collection(typeKey).add({ name, parentId, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
     .then(() => { input.value = ''; toast('Added.', 'ok'); })
     .catch(err => toast('Could not add: ' + err.message, 'err'));
 }
 function removeMasterEntry(typeKey, id){
-  db.collection(typeKey).doc(id).delete()
-    .then(() => toast('Removed.', 'ok'))
+  // Cascade — remove any sub-items nested under this one too, so nothing
+  // gets orphaned and invisible.
+  const children = mastersData[typeKey].filter(it => it.parentId === id);
+  const batch = db.batch();
+  batch.delete(db.collection(typeKey).doc(id));
+  children.forEach(c => batch.delete(db.collection(typeKey).doc(c.id)));
+  batch.commit()
+    .then(() => toast(children.length ? `Removed (and ${children.length} sub-item${children.length > 1 ? 's' : ''}).` : 'Removed.', 'ok'))
     .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
 function seedMasterDefaults(typeKey){
   const mt = MASTER_TYPES.find(m => m.key === typeKey);
   const batch = db.batch();
   mt.starter.forEach(name => {
-    batch.set(db.collection(typeKey).doc(), { name, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    batch.set(db.collection(typeKey).doc(), { name, parentId: null, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   });
   batch.commit()
     .then(() => toast(`Loaded starter ${mt.label.toLowerCase()} list.`, 'ok'))
     .catch(err => toast('Could not seed: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   WORKFLOW CONFIGURATION (admin edits; live for everyone)
+   Steps sharing a stage number run in parallel (all must approve to
+   advance); different stage numbers run sequentially in ascending order.
+   Admin-typed stage numbers don't need to be contiguous — they're
+   normalized to 0,1,2... here, so gaps or arbitrary numbering are fine.
+   This only affects documents uploaded AFTER a change; documents already
+   in progress keep the step shape they were created with (see
+   applyStepDecision / renderDetail, which read from each document's own
+   frozen steps rather than this live config).
+============================================================ */
+function listenWorkflowConfig(){
+  const unsub = db.collection('workflowSteps').orderBy('stage').onSnapshot(snap => {
+    const raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const distinctStages = [...new Set(raw.map(s => s.stage))].sort((a,b) => a-b);
+    const stageMap = new Map(distinctStages.map((s,i) => [s,i]));
+    WORKFLOW_STEPS = raw.map(s => ({ key: s.id, label: s.label, role: s.role, stage: stageMap.get(s.stage) }));
+    TOTAL_STAGES = distinctStages.length;
+    if(currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+  }, err => console.error('workflow config listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function renderWorkflowConfigView(){
+  const panel = document.getElementById('workflowConfigPanel');
+  if(!panel) return;
+  if(WORKFLOW_STEPS.length === 0){
+    panel.innerHTML = `<div class="empty-state"><div class="ic">&#8942;</div><b>No workflow configured yet</b>
+      <div style="margin:8px 0 16px;">Uploads are blocked until at least one step exists.</div>
+      <button class="btn btn-teal btn-sm" onclick="seedDefaultWorkflow()">Load starter workflow (4 steps, 3 stages)</button>
+    </div>`;
+    return;
+  }
+  const stageNumbers = [...new Set(WORKFLOW_STEPS.map(s => s.stage))].sort((a,b) => a-b);
+  const stagesHtml = stageNumbers.map(stageNum => {
+    const stepsInStage = WORKFLOW_STEPS.filter(s => s.stage === stageNum);
+    const rows = stepsInStage.map(s => `
+      <div class="master-item">
+        <span>${escapeHtml(s.label)} <span style="color:var(--text-muted); font-weight:400;">&middot; ${escapeHtml(ROLE_LABELS[s.role]||s.role)}</span></span>
+        <button onclick="removeWorkflowStep('${s.key}')" title="Remove">&times;</button>
+      </div>`).join('');
+    return `<div class="workflow-stage-block">
+      <h4>Stage ${stageNum+1}${stepsInStage.length > 1 ? ' <span style="font-weight:400; color:var(--text-muted); font-size:12px;">&middot; parallel, all must approve</span>' : ''}</h4>
+      <div class="master-list">${rows}</div>
+    </div>`;
+  }).join('');
+  const maxStage = Math.max(...stageNumbers);
+
+  panel.innerHTML = `
+    ${stagesHtml}
+    <div class="workflow-add-block">
+      <h4>Add a step</h4>
+      <div class="workflow-add-row">
+        <input type="text" id="newStepLabel" placeholder="Step label, e.g. Legal Review">
+        <select id="newStepRole">
+          <option value="">Role&hellip;</option>
+          ${Object.entries(ROLE_LABELS).map(([k,v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
+        </select>
+        <select id="newStepStage">
+          ${stageNumbers.map(n => `<option value="${n}">Stage ${n+1} (parallel with existing)</option>`).join('')}
+          <option value="${maxStage+1}" selected>New stage after Stage ${maxStage+1}</option>
+        </select>
+        <button class="btn btn-teal btn-sm" onclick="addWorkflowStep()">Add Step</button>
+      </div>
+    </div>
+  `;
+}
+
+function addWorkflowStep(){
+  const label = document.getElementById('newStepLabel').value.trim();
+  const role = document.getElementById('newStepRole').value;
+  const stage = parseInt(document.getElementById('newStepStage').value, 10);
+  if(!label || !role){ toast('Please enter a label and choose a role.', 'err'); return; }
+  db.collection('workflowSteps').add({ label, role, stage, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => toast('Step added.', 'ok'))
+    .catch(err => toast('Could not add step: ' + err.message, 'err'));
+}
+function removeWorkflowStep(id){
+  if(WORKFLOW_STEPS.length <= 1){ toast('At least one step is required — add a replacement before removing the last one.', 'err'); return; }
+  db.collection('workflowSteps').doc(id).delete()
+    .then(() => toast('Step removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+function seedDefaultWorkflow(){
+  const batch = db.batch();
+  DEFAULT_WORKFLOW_STEPS.forEach(s => {
+    batch.set(db.collection('workflowSteps').doc(), { label: s.label, role: s.role, stage: s.stage, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  });
+  batch.commit()
+    .then(() => toast('Starter workflow loaded.', 'ok'))
+    .catch(err => toast('Could not seed: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   STATUS LABELS (admin edits; live for everyone)
+   The underlying status keys are fixed (they're wired into the approval
+   engine's logic) — this only lets an Admin rename how each one displays.
+============================================================ */
+function listenStatusLabels(){
+  const unsub = db.collection('statusLabels').onSnapshot(snap => {
+    const overrides = {};
+    snap.docs.forEach(d => { overrides[d.id] = d.data().label; });
+    STATUS_LABELS = { ...DEFAULT_STATUS_LABELS, ...overrides };
+    if(currentUser && currentUser.role === 'admin') renderStatusConfigView();
+    renderDocsTable();
+    renderQueue();
+  }, err => console.error('status labels listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function renderStatusConfigView(){
+  const panel = document.getElementById('statusConfigPanel');
+  if(!panel) return;
+  panel.innerHTML = Object.keys(DEFAULT_STATUS_LABELS).map(key => `
+    <div class="status-edit-row">
+      <span class="status-key">${key}</span>
+      <input type="text" id="statuslabel_${key}" value="${escapeHtml(STATUS_LABELS[key])}">
+      <button class="btn btn-teal btn-sm" onclick="saveStatusLabel('${key}')">Save</button>
+    </div>
+  `).join('');
+}
+
+function saveStatusLabel(key){
+  const input = document.getElementById('statuslabel_' + key);
+  const label = input.value.trim();
+  if(!label){ toast('Label cannot be empty.', 'err'); return; }
+  db.collection('statusLabels').doc(key).set({ label })
+    .then(() => toast('Saved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   USERS (admin only)
+   Accounts are created here by an Admin, not via public self-registration.
+   Creating a user uses a SECONDARY, temporary Firebase App instance so the
+   admin's own session isn't disturbed — calling createUserWithEmailAndPassword
+   on the primary auth instance would otherwise sign the admin out and into
+   the new account, which is Firebase's normal (but unhelpful here) behavior.
+============================================================ */
+let usersData = [];
+function listenUsers(){
+  const unsub = db.collection('users').orderBy('name').onSnapshot(snap => {
+    usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin') renderUsersView();
+  }, err => console.error('users listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function renderUsersView(){
+  const body = document.getElementById('usersTableBody');
+  if(!body) return;
+  if(usersData.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No users yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = usersData.map(u => {
+    const enabled = u.enabled !== false;
+    const isSelf = u.id === currentUser.uid;
+    return `<tr>
+      <td>${escapeHtml(u.name || '—')}</td>
+      <td>${escapeHtml(u.email || '—')}</td>
+      <td>${escapeHtml(ROLE_LABELS[u.role] || u.role || '—')}</td>
+      <td>${escapeHtml(u.department || '—')}</td>
+      <td><span class="badge ${enabled ? 'st-published' : 'st-rejected'}"><span class="dot"></span>${enabled ? 'Enabled' : 'Disabled'}</span></td>
+      <td style="text-align:right;">
+        ${isSelf
+          ? `<span style="font-size:11.5px; color:var(--text-muted);">This is you</span>`
+          : `<button class="btn btn-ghost btn-sm" onclick="toggleUserEnabled('${u.id}', ${enabled})">${enabled ? 'Disable' : 'Enable'}</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleUserEnabled(uid, currentlyEnabled){
+  db.collection('users').doc(uid).update({ enabled: !currentlyEnabled })
+    .then(() => toast(currentlyEnabled ? 'Account disabled.' : 'Account enabled.', 'ok'))
+    .catch(err => toast('Could not update: ' + err.message, 'err'));
+}
+
+function openCreateUserModal(){
+  document.getElementById('newUserName').value = '';
+  document.getElementById('newUserEmail').value = '';
+  document.getElementById('newUserPassword').value = '';
+  document.getElementById('newUserRole').value = '';
+  document.getElementById('newUserDept').value = '';
+  openModal('createUserModalOverlay');
+}
+
+function submitCreateUser(){
+  const name = document.getElementById('newUserName').value.trim();
+  const email = document.getElementById('newUserEmail').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const role = document.getElementById('newUserRole').value;
+  const department = document.getElementById('newUserDept').value;
+  if(!name || !email || !password || !role){ toast('Please fill in name, email, password, and role.', 'err'); return; }
+  if(password.length < 6){ toast('Password should be at least 6 characters.', 'err'); return; }
+
+  const btn = document.getElementById('createUserConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+
+  const secondaryApp = firebase.initializeApp(firebaseConfig, 'secondary-' + Date.now());
+  const secondaryAuth = secondaryApp.auth();
+
+  secondaryAuth.createUserWithEmailAndPassword(email, password)
+    .then(cred => db.collection('users').doc(cred.user.uid).set({
+      name, email, role, department: department || '',
+      enabled: true,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: currentUser.uid
+    }))
+    .then(() => secondaryAuth.signOut())
+    .then(() => secondaryApp.delete())
+    .then(() => {
+      toast('User created — share the email and password with them directly.', 'ok');
+      closeModal('createUserModalOverlay');
+    })
+    .catch(err => {
+      toast('Could not create user: ' + friendlyAuthError(err), 'err');
+      secondaryApp.delete().catch(() => {});
+    })
+    .finally(() => { btn.disabled = false; btn.textContent = 'Create User'; });
 }
 
 /* ============================================================
@@ -575,6 +896,9 @@ function startListeners(){
   listenQueue();
   listenAllDocuments();
   listenNotifications();
+  listenWorkflowConfig();
+  listenStatusLabels();
+  if(currentUser.role === 'admin') listenUsers();
   renderMastersView(); // in case this admin loaded masters before currentUser was set
 }
 
@@ -584,6 +908,10 @@ function stopSessionListeners(){
   queueMap = new Map();
   allDocsSnapshot = [];
   notifMap = new Map();
+  usersData = [];
+  WORKFLOW_STEPS = DEFAULT_WORKFLOW_STEPS.slice();
+  TOTAL_STAGES = new Set(DEFAULT_WORKFLOW_STEPS.map(s => s.stage)).size;
+  STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
 }
 
 listenMasters(); // public read — populate registration + upload dropdowns even before sign-in
