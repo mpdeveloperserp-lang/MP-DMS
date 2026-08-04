@@ -711,6 +711,7 @@ auth.onAuthStateChanged(user => {
     });
   } else {
     currentUser = null;
+    if(typeof stopSessionListeners === 'function') stopSessionListeners();
     document.getElementById('appShell').classList.remove('active');
     document.getElementById('loginScreen').style.display = 'flex';
   }
