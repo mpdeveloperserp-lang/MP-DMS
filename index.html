@@ -691,7 +691,13 @@ function friendlyAuthError(err){
   return map[err.code] || err.message;
 }
 
-function handleLogout(){ auth.signOut(); }
+function handleLogout(){
+  // A full reload on logout, rather than staying on the same page, avoids a
+  // Firestore SDK edge case where its connection can get stuck after an
+  // auth credential change mid-session. Every fresh page load has connected
+  // reliably in testing; only same-session re-auth has been flaky.
+  auth.signOut().finally(() => { window.location.reload(); });
+}
 
 auth.onAuthStateChanged(user => {
   if(user){
