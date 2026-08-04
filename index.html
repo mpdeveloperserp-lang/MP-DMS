@@ -174,9 +174,29 @@
   .master-item button{border:none; background:transparent; color:var(--red); font-size:15px; line-height:1; padding:2px 4px; border-radius:5px;}
   .master-item button:hover{background:var(--red-soft);}
   .master-empty{font-size:12.5px; color:var(--text-muted); text-align:center; padding:14px 4px;}
+  .workflow-stage-block{margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--border);}
+  .workflow-stage-block:last-of-type{border-bottom:none; margin-bottom:8px;}
+  .workflow-stage-block h4{font-size:13.5px; margin-bottom:9px; color:var(--navy);}
+  .workflow-add-block h4{font-size:11.5px; color:var(--text-muted); margin-bottom:9px; text-transform:uppercase; letter-spacing:.06em; font-weight:700;}
+  .workflow-add-row{display:flex; gap:8px; flex-wrap:wrap;}
+  .workflow-add-row input, .workflow-add-row select{padding:9px 11px; border:1px solid var(--border); border-radius:7px; font-size:13px;}
+  .workflow-add-row input{flex:1; min-width:200px;}
+  .status-edit-row{display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--border);}
+  .status-edit-row:last-child{border-bottom:none;}
+  .status-key{font-family:var(--mono); font-size:10.5px; color:var(--text-muted); width:150px; flex:none;}
+  .status-edit-row input{flex:1; padding:9px 11px; border:1px solid var(--border); border-radius:7px; font-size:13px; max-width:320px;}
+  .master-item-wrap{margin-bottom:6px;}
+  .master-chevron{font-size:9px; color:var(--text-muted); width:10px; display:inline-block;}
+  .master-subcount{background:var(--border); color:var(--text-muted); font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px;}
+  .master-sublist{margin:4px 0 2px 22px; padding-left:10px; border-left:2px solid var(--border); display:flex; flex-direction:column; gap:5px;}
+  .master-subitem{background:#fff; border:1px solid var(--border); font-size:12px;}
+  .master-sub-add-row input{padding:6px 9px; font-size:12px;}
+  .master-sub-add-row button{padding:6px 10px; font-size:12px;}
 
   .card{background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);}
   .panel{padding:22px;}
+  .doc-filter-row{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;}
+  .doc-filter-row .field{min-width:180px;}
 
   /* ---------- Upload form ---------- */
   .upload-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; max-width:760px;}
@@ -344,10 +364,6 @@
       <div class="auth-mark">MP</div>
       <div class="auth-brand-text"><b>MP Developers DMS</b><span>Approval Workflow Engine</span></div>
     </div>
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="tabLoginBtn" onclick="setAuthTab('login')">Sign In</button>
-      <button class="auth-tab" id="tabRegisterBtn" onclick="setAuthTab('register')">Register</button>
-    </div>
     <div class="auth-error" id="authError"></div>
 
     <form id="loginForm" onsubmit="return handleLogin(event)">
@@ -355,35 +371,10 @@
       <div class="field"><label>Password</label><input type="password" id="loginPassword" required autocomplete="current-password"></div>
       <button class="btn btn-primary" type="submit" id="loginBtn">Sign In</button>
     </form>
-
-    <form id="registerForm" class="hidden" onsubmit="return handleRegister(event)">
-      <div class="field"><label>Full name</label><input type="text" id="regName" required></div>
-      <div class="field"><label>Email</label><input type="email" id="regEmail" required autocomplete="username"></div>
-      <div class="field"><label>Password</label><input type="password" id="regPassword" minlength="6" required autocomplete="new-password"></div>
-      <div class="field">
-        <label>Role</label>
-        <select id="regRole" required>
-          <option value="">Select your role&hellip;</option>
-          <option value="project_engineer">Project Engineer (uploader)</option>
-          <option value="architect">Architect (uploader)</option>
-          <option value="site_engineer">Site Engineer (uploader)</option>
-          <option value="planning_engineer">Planning Engineer (Stage 1 reviewer)</option>
-          <option value="qa_manager">QA Manager (Stage 1 reviewer)</option>
-          <option value="project_manager">Project Manager (Stage 2 approver)</option>
-          <option value="management">Management (Stage 3 approver)</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-      <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
-        <select id="regDept">
-          <option value="">Select department&hellip; (or leave blank)</option>
-        </select>
-      </div>
-      <button class="btn btn-primary" type="submit" id="registerBtn">Create Account</button>
-    </form>
-    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Every account can upload; the role you choose determines which approval stage you can act on. First time setting this up? Register one account as <b>Admin</b> (department can stay blank), sign in, then use <b>Manage Masters</b> in the sidebar to add your Projects/Departments/Categories before anyone else registers.</div>
+    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Accounts are created by an Admin under <b>Manage Users</b> once signed in &mdash; there's no public self-registration. If you don't have an account yet, ask your Admin to create one for you.</div>
   </div>
 </div>
+
 
 <!-- ============================================================ APP SHELL ============================================================ -->
 <div id="appShell">
@@ -407,11 +398,12 @@
     <div class="nav-group-label">Lifecycle</div>
     <button class="nav-item active" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
-    <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> All Documents</button>
-    <div class="nav-group-label">Reference</div>
-    <button class="nav-item" data-view="workflowView" onclick="switchView('workflowView')"><span class="ic">&#8942;</span> Workflow Map</button>
+    <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
+    <button class="nav-item hidden" id="adminUsersNavBtn" data-view="usersView" onclick="switchView('usersView')"><span class="ic">&#128101;</span> Manage Users</button>
     <button class="nav-item hidden" id="adminNavBtn" data-view="mastersView" onclick="switchView('mastersView')"><span class="ic">&#9881;</span> Manage Masters</button>
+    <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
+    <button class="nav-item hidden" id="adminStatusNavBtn" data-view="statusConfigView" onclick="switchView('statusConfigView')"><span class="ic">&#127991;</span> Status Labels</button>
   </div>
 
   <div class="main">
@@ -419,7 +411,7 @@
     <!-- ---------------- UPLOAD VIEW ---------------- -->
     <div class="view active" id="uploadView">
       <div class="view-head"><h2>Upload Document</h2></div>
-      <div class="view-sub">New uploads enter Stage 1 (parallel Planning + QA review) automatically.</div>
+      <div class="view-sub" id="uploadSub">New uploads enter the configured approval workflow automatically.</div>
       <div class="card panel">
         <form id="uploadForm" onsubmit="return handleUpload(event)">
           <div class="upload-grid">
@@ -469,10 +461,18 @@
       </div>
     </div>
 
-    <!-- ---------------- ALL DOCUMENTS VIEW ---------------- -->
+    <!-- ---------------- DOCUMENTS VIEW ---------------- -->
     <div class="view" id="docsView">
-      <div class="view-head"><h2>All Documents</h2></div>
+      <div class="view-head"><h2>Documents</h2></div>
       <div class="view-sub">Every document submitted into the lifecycle. Click a row to open its approval timeline.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <div class="doc-filter-row">
+          <div class="field" style="margin-bottom:0;"><label>Project</label><select id="filterProject" onchange="applyDocFilters()"><option value="">All projects</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>Department</label><select id="filterDepartment" onchange="applyDocFilters()"><option value="">All departments</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>Category</label><select id="filterCategory" onchange="applyDocFilters()"><option value="">All categories</option></select></div>
+          <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearDocFilters()">Clear filters</button>
+        </div>
+      </div>
       <div class="card">
         <table>
           <thead><tr><th>Drawing No.</th><th>Title</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
@@ -483,30 +483,39 @@
       </div>
     </div>
 
-    <!-- ---------------- WORKFLOW MAP VIEW ---------------- -->
-    <div class="view" id="workflowView">
-      <div class="view-head"><h2>Workflow Map</h2></div>
-      <div class="view-sub">The configured approval chain every uploaded document follows.</div>
-      <div class="card panel">
-        <div class="stage-track" style="max-width:640px;">
-          <div class="stage-node done"><div class="line"></div><div class="circle">1</div><div class="lbl">Planning Review<br><span style="font-weight:400;">(parallel)</span></div></div>
-          <div class="stage-node done"><div class="line"></div><div class="circle">1</div><div class="lbl">QA Review<br><span style="font-weight:400;">(parallel)</span></div></div>
-          <div class="stage-node active"><div class="line"></div><div class="circle">2</div><div class="lbl">Project Manager<br>Approval</div></div>
-          <div class="stage-node"><div class="line"></div><div class="circle">3</div><div class="lbl">Management<br>Approval + Signature</div></div>
-        </div>
-        <p style="font-size:13px; color:var(--text-muted); line-height:1.6; margin-top:10px;">
-          Stage 1 is parallel &mdash; Planning and QA review simultaneously. The document only advances to Stage 2 once <b>both</b> approve.
-          Stage 2 (Project Manager) and Stage 3 (Management) run sequentially. Management's approval requires a typed digital signature and immediately publishes the document.
-          A rejection at any stage returns the document to the uploader, who can submit a new revision that restarts the chain from Stage 1.
-        </p>
+    <!-- ---------------- MANAGE USERS VIEW (admin only) ---------------- -->
+    <div class="view" id="usersView">
+      <div class="view-head"><h2>Manage Users</h2><button class="btn btn-teal" onclick="openCreateUserModal()">+ Create User</button></div>
+      <div class="view-sub">Create accounts and enable/disable access. There's no public self-registration &mdash; this is the only way new accounts get created.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th><th></th></tr></thead>
+          <tbody id="usersTableBody">
+            <tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
     <!-- ---------------- MANAGE MASTERS VIEW (admin only) ---------------- -->
     <div class="view" id="mastersView">
       <div class="view-head"><h2>Manage Masters</h2></div>
-      <div class="view-sub">These lists feed the Project / Department / Category dropdowns on Upload and Registration. Admin only.</div>
+      <div class="view-sub">These lists feed the Project / Department / Category dropdowns on Upload and Create User. Click an entry to expand and add sub-items under it.</div>
       <div class="stat-row" style="grid-template-columns:repeat(3,1fr);" id="mastersGrid"></div>
+    </div>
+
+    <!-- ---------------- WORKFLOW CONFIGURATION VIEW (admin only) ---------------- -->
+    <div class="view" id="workflowConfigView">
+      <div class="view-head"><h2>Workflow Configuration</h2></div>
+      <div class="view-sub">Configure the approval chain new uploads follow. Steps that share the same stage number run in parallel; different stage numbers run sequentially in order. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
+      <div class="card panel" id="workflowConfigPanel"></div>
+    </div>
+
+    <!-- ---------------- STATUS LABELS VIEW (admin only) ---------------- -->
+    <div class="view" id="statusConfigView">
+      <div class="view-head"><h2>Status Labels</h2></div>
+      <div class="view-sub">Rename how each lifecycle status is displayed across the app &mdash; the underlying stages stay the same, only the wording changes.</div>
+      <div class="card panel" id="statusConfigPanel"></div>
     </div>
 
   </div>
@@ -569,6 +578,40 @@
   </div>
 </div>
 
+<!-- ---------------- CREATE USER MODAL (admin only) ---------------- -->
+<div class="modal-overlay" id="createUserModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Create User</h3><button class="modal-close" onclick="closeModal('createUserModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Full name</label><input type="text" id="newUserName"></div>
+      <div class="field"><label>Email</label><input type="email" id="newUserEmail" autocomplete="off"></div>
+      <div class="field"><label>Temporary password</label><input type="text" id="newUserPassword" minlength="6" placeholder="At least 6 characters"></div>
+      <div class="field">
+        <label>Role</label>
+        <select id="newUserRole">
+          <option value="">Select role&hellip;</option>
+          <option value="project_engineer">Project Engineer (uploader)</option>
+          <option value="architect">Architect (uploader)</option>
+          <option value="site_engineer">Site Engineer (uploader)</option>
+          <option value="planning_engineer">Planning Engineer (Stage 1 reviewer)</option>
+          <option value="qa_manager">QA Manager (Stage 1 reviewer)</option>
+          <option value="project_manager">Project Manager (Stage 2 approver)</option>
+          <option value="management">Management (Stage 3 approver)</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <select id="newUserDept"><option value="">Select department&hellip; (or leave blank)</option></select>
+      </div>
+      <div class="auth-hint" style="margin-top:0;">Share the email and temporary password with them directly &mdash; there's no automated invite email in this build. They can sign in right away.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('createUserModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="createUserConfirmBtn" onclick="submitCreateUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
@@ -593,24 +636,32 @@ const storage = firebase.storage();
 
 /* ============================================================
    WORKFLOW TEMPLATE
+   WORKFLOW_STEPS, TOTAL_STAGES, and STATUS_LABELS are now live config,
+   loaded from Firestore by listenWorkflowConfig()/listenStatusLabels() in
+   app-workflow.js (Admin-editable under Workflow Configuration / Status
+   Labels). The defaults below are just the seed shown as a starting point
+   there — they render immediately so the app isn't blank before that first
+   Firestore read completes.
 ============================================================ */
 const ROLE_LABELS = {
   project_engineer:'Project Engineer', architect:'Architect', site_engineer:'Site Engineer',
   planning_engineer:'Planning Engineer', qa_manager:'QA Manager',
   project_manager:'Project Manager', management:'Management', admin:'Admin'
 };
-const WORKFLOW_STEPS = [
+const DEFAULT_WORKFLOW_STEPS = [
   { key:'planning_review', label:'Planning Review', role:'planning_engineer', stage:0 },
   { key:'qa_review',       label:'QA Review',        role:'qa_manager',        stage:0 },
   { key:'pm_approval',     label:'Project Manager Approval', role:'project_manager', stage:1 },
   { key:'mgmt_approval',   label:'Management Approval',      role:'management',      stage:2 }
 ];
-const TOTAL_STAGES = 3;
-const STAGE_LABELS = ['Stage 1 · Parallel Review', 'Stage 2 · PM Approval', 'Stage 3 · Management Approval'];
-const STATUS_LABELS = {
+const DEFAULT_STATUS_LABELS = {
   pending_review:'Pending Review', pending_approval:'Pending Approval',
   approved:'Approved', published:'Published', rejected:'Rejected'
 };
+let WORKFLOW_STEPS = DEFAULT_WORKFLOW_STEPS.slice();
+let TOTAL_STAGES = new Set(DEFAULT_WORKFLOW_STEPS.map(s => s.stage)).size;
+let STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
+
 function freshSteps(){
   return WORKFLOW_STEPS.map(s => ({...s, decision:'pending', decidedBy:null, decidedByName:null, decidedAt:null, remarks:null}));
 }
@@ -629,13 +680,6 @@ let activeDocId = null;      // doc currently open in detail modal
 /* ============================================================
    AUTH
 ============================================================ */
-function setAuthTab(tab){
-  document.getElementById('tabLoginBtn').classList.toggle('active', tab==='login');
-  document.getElementById('tabRegisterBtn').classList.toggle('active', tab==='register');
-  document.getElementById('loginForm').classList.toggle('hidden', tab!=='login');
-  document.getElementById('registerForm').classList.toggle('hidden', tab!=='register');
-  hideAuthError();
-}
 function showAuthError(msg){ const e=document.getElementById('authError'); e.textContent=msg; e.style.display='block'; }
 function hideAuthError(){ document.getElementById('authError').style.display='none'; }
 
@@ -649,26 +693,6 @@ function handleLogin(ev){
   auth.signInWithEmailAndPassword(email, pw)
     .catch(err => { showAuthError(friendlyAuthError(err)); })
     .finally(() => { btn.disabled=false; btn.textContent='Sign In'; });
-  return false;
-}
-
-function handleRegister(ev){
-  ev.preventDefault();
-  hideAuthError();
-  const name = document.getElementById('regName').value.trim();
-  const email = document.getElementById('regEmail').value.trim();
-  const pw = document.getElementById('regPassword').value;
-  const role = document.getElementById('regRole').value;
-  const dept = document.getElementById('regDept').value;
-  if(!role){ showAuthError('Please select a role.'); return false; }
-  const btn = document.getElementById('registerBtn');
-  btn.disabled = true; btn.textContent = 'Creating account…';
-  auth.createUserWithEmailAndPassword(email, pw)
-    .then(cred => db.collection('users').doc(cred.user.uid).set({
-      name, email, role, department: dept, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    }))
-    .catch(err => { showAuthError(friendlyAuthError(err)); })
-    .finally(() => { btn.disabled=false; btn.textContent='Create Account'; });
   return false;
 }
 
@@ -696,11 +720,16 @@ auth.onAuthStateChanged(user => {
   if(user){
     loadUserProfile(user.uid).then(snap => {
       if(!snap.exists){
-        showAuthError('Your account has no profile yet — please contact an admin, or register again with a different email.');
+        showAuthError('Your account has no profile yet — ask an Admin to create one for you under Manage Users.');
         auth.signOut();
         return;
       }
       const d = snap.data();
+      if(d.enabled === false){
+        showAuthError('Your account has been disabled. Contact an Admin if this is unexpected.');
+        auth.signOut();
+        return;
+      }
       currentUser = { uid:user.uid, email:user.email, name:d.name, role:d.role, department:d.department };
       enterApp();
     }).catch(err => {
@@ -725,6 +754,9 @@ function enterApp(){
   if(currentUser.role === 'admin'){
     document.getElementById('adminNavGroup').classList.remove('hidden');
     document.getElementById('adminNavBtn').classList.remove('hidden');
+    document.getElementById('adminUsersNavBtn').classList.remove('hidden');
+    document.getElementById('adminWorkflowNavBtn').classList.remove('hidden');
+    document.getElementById('adminStatusNavBtn').classList.remove('hidden');
   }
   if(typeof startListeners === 'function'){
     startListeners();
@@ -831,6 +863,10 @@ function resetUploadForm(){
 function handleUpload(ev){
   ev.preventDefault();
   if(!selectedFile){ toast('Please choose a file to upload.', 'err'); return false; }
+  if(WORKFLOW_STEPS.length === 0){
+    toast('No approval workflow is configured yet. Ask an Admin to set one up under Workflow Configuration.', 'err');
+    return false;
+  }
   const meta = {
     project: document.getElementById('fProject').value,
     department: document.getElementById('fDepartment').value,
@@ -882,8 +918,9 @@ function handleUpload(ev){
           timestamp: now, remarks: null, toStatus:'pending_review'
         });
         batch.commit().then(() => {
-          notifyRoles(['planning_engineer','qa_manager'],
-            `${meta.drawingNumber} — ${meta.title} needs your Stage 1 review.`, docRef.id);
+          const stage0Roles = WORKFLOW_STEPS.filter(s => s.stage === 0).map(s => s.role);
+          notifyRoles(stage0Roles,
+            `${meta.drawingNumber} — ${meta.title} needs your review.`, docRef.id);
           toast('Document uploaded and sent for review.', 'ok');
           document.getElementById('uploadForm').reset();
           resetUploadForm();
