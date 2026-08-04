@@ -112,6 +112,11 @@ document.addEventListener('click', e => {
    MY APPROVAL QUEUE
 ============================================================ */
 let queueMap = new Map();
+let queueShowOverdueOnly = false;
+function toggleOverdueOnly(){
+  queueShowOverdueOnly = !queueShowOverdueOnly;
+  renderQueue();
+}
 function listenQueue(){
   const unsub = db.collectionGroup('versions').where('status','in',['pending_review','pending_approval'])
     .onSnapshot(snap => {
@@ -128,7 +133,7 @@ function listenQueue(){
   activeSessionUnsubs.push(unsub);
 }
 function renderQueue(){
-  const mine = Array.from(queueMap.values()).filter(v =>
+  let mine = Array.from(queueMap.values()).filter(v =>
     (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (s.role === currentUser.role || currentUser.role === 'admin'))
   );
   mine.sort((a,b) => ((a.uploadedAt&&a.uploadedAt.toMillis)?a.uploadedAt.toMillis():0) - ((b.uploadedAt&&b.uploadedAt.toMillis)?b.uploadedAt.toMillis():0));
@@ -141,13 +146,16 @@ function renderQueue(){
   const publishedCount = allDocsSnapshot.filter(d => d.status === 'published').length;
   document.getElementById('queueStats').innerHTML = `
     <div class="stat-card accent-gold"><div class="num">${mine.length}</div><div class="lbl">Awaiting your action</div></div>
-    <div class="stat-card accent-red"><div class="num">${overdueCount}</div><div class="lbl">Overdue &gt; 2 days</div></div>
-    <div class="stat-card accent-teal"><div class="num">${queueMap.size}</div><div class="lbl">Active in the workflow</div></div>
-    <div class="stat-card"><div class="num">${publishedCount}</div><div class="lbl">Published documents</div></div>`;
+    <div class="stat-card accent-red clickable ${queueShowOverdueOnly?'stat-active':''}" onclick="toggleOverdueOnly()"><div class="num">${overdueCount}</div><div class="lbl">Overdue &gt; 2 days${queueShowOverdueOnly?' &middot; showing only these':''}</div></div>
+    <div class="stat-card accent-teal clickable" onclick="goToDocumentsFiltered('')"><div class="num">${queueMap.size}</div><div class="lbl">Active in the workflow</div></div>
+    <div class="stat-card clickable" onclick="goToDocumentsFiltered('published')"><div class="num">${publishedCount}</div><div class="lbl">Published documents</div></div>`;
 
+  if(queueShowOverdueOnly) mine = mine.filter(isOverdue);
   const list = document.getElementById('queueList');
   if(mine.length === 0){
-    list.innerHTML = `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on your ${escapeHtml(ROLE_LABELS[currentUser.role]||'')} approval right now.</div></div>`;
+    list.innerHTML = queueShowOverdueOnly
+      ? `<div class="empty-state"><div class="ic">&#9989;</div><b>Nothing overdue</b><div>None of your pending items are over 2 days old. <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="toggleOverdueOnly()">Show all</button></div></div>`
+      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on your ${escapeHtml(ROLE_LABELS[currentUser.role]||'')} approval right now.</div></div>`;
     return;
   }
   list.innerHTML = mine.map(v => {
@@ -192,19 +200,40 @@ function listenAllDocuments(){
   });
   activeSessionUnsubs.push(unsub);
 }
-let docFilters = { project: '', department: '', category: '' };
+let docFilters = { project: '', department: '', category: '', status: '' };
 function applyDocFilters(){
   docFilters.project = document.getElementById('filterProject').value;
   docFilters.department = document.getElementById('filterDepartment').value;
   docFilters.category = document.getElementById('filterCategory').value;
+  docFilters.status = document.getElementById('filterStatus').value;
   renderDocsTable();
 }
 function clearDocFilters(){
-  docFilters = { project: '', department: '', category: '' };
+  docFilters = { project: '', department: '', category: '', status: '' };
   document.getElementById('filterProject').value = '';
   document.getElementById('filterDepartment').value = '';
   document.getElementById('filterCategory').value = '';
+  document.getElementById('filterStatus').value = '';
   renderDocsTable();
+}
+// Jump to Documents pre-filtered by status — used by the clickable stat
+// cards on My Approval Queue (e.g. "Published documents").
+function goToDocumentsFiltered(statusKey){
+  clearDocFilters();
+  docFilters.status = statusKey || '';
+  const sel = document.getElementById('filterStatus');
+  if(sel) sel.value = docFilters.status;
+  switchView('docsView');
+  renderDocsTable();
+}
+
+function populateStatusFilterOptions(){
+  const sel = document.getElementById('filterStatus');
+  if(!sel) return;
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">All statuses</option>' +
+    Object.keys(STATUS_LABELS).map(key => `<option value="${key}">${escapeHtml(STATUS_LABELS[key])}</option>`).join('');
+  sel.value = prevValue;
 }
 
 function renderDocsTable(){
@@ -212,7 +241,8 @@ function renderDocsTable(){
   const filtered = allDocsSnapshot.filter(d =>
     (!docFilters.project || d.project === docFilters.project) &&
     (!docFilters.department || d.department === docFilters.department) &&
-    (!docFilters.category || d.category === docFilters.category)
+    (!docFilters.category || d.category === docFilters.category) &&
+    (!docFilters.status || d.status === docFilters.status)
   );
   if(allDocsSnapshot.length === 0){
     body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128193;</div><b>No documents yet</b><div>Upload the first one from the Upload Document tab.</div></div></td></tr>`;
@@ -758,6 +788,7 @@ function listenStatusLabels(){
     const overrides = {};
     snap.docs.forEach(d => { overrides[d.id] = d.data().label; });
     STATUS_LABELS = { ...DEFAULT_STATUS_LABELS, ...overrides };
+    populateStatusFilterOptions();
     if(currentUser && currentUser.role === 'admin') renderStatusConfigView();
     renderDocsTable();
     renderQueue();
@@ -893,6 +924,7 @@ let activeSessionUnsubs = [];
 
 function startListeners(){
   stopSessionListeners(); // safety: clear anything left over before attaching fresh ones
+  populateStatusFilterOptions(); // seed with current STATUS_LABELS immediately, live listener refines it
   listenQueue();
   listenAllDocuments();
   listenNotifications();
