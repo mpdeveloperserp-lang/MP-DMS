@@ -695,7 +695,7 @@ function handleLogout(){ auth.signOut(); }
 
 auth.onAuthStateChanged(user => {
   if(user){
-    getUserProfileWithRetry(user.uid, 3).then(snap => {
+    loadUserProfile(user.uid).then(snap => {
       if(!snap.exists){
         showAuthError('Your account has no profile yet — please contact an admin, or register again with a different email.');
         auth.signOut();
@@ -737,18 +737,37 @@ function initials(name){
   return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 }
 
-// A one-shot .get() called the instant auth resolves can catch Firestore's
-// connection mid-warm-up and throw "client is offline" even though the
-// connection is fine moments later (visible as normal 200s in the Network
-// tab). Retry a few times with a short delay before treating it as a real
-// failure.
-function getUserProfileWithRetry(uid, attemptsLeft){
-  return db.collection('users').doc(uid).get().catch(err => {
-    if(attemptsLeft > 0){
-      return new Promise(resolve => setTimeout(resolve, 1200))
-        .then(() => getUserProfileWithRetry(uid, attemptsLeft - 1));
-    }
-    throw err;
+// A one-shot .get() can throw "client is offline" while Firestore's
+// connection is still settling, even when the connection is fine moments
+// later (confirmed in Network tab as normal 200s). onSnapshot is built to
+// tolerate that — it waits and delivers data once available instead of
+// throwing, so we use it for this one-time read too, then immediately
+// unsubscribe once we have the first result.
+function loadUserProfile(uid){
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if(!settled){
+        settled = true;
+        unsub();
+        reject(new Error('Timed out waiting for Firestore after 20 seconds.'));
+      }
+    }, 20000);
+    const unsub = db.collection('users').doc(uid).onSnapshot(
+      snap => {
+        if(settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        unsub();
+        resolve(snap);
+      },
+      err => {
+        if(settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(err);
+      }
+    );
   });
 }
 
