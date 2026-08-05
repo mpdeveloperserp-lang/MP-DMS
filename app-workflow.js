@@ -568,14 +568,17 @@ const MASTER_TYPES = [
   { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
+    inUseMessage: 'This project is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
   { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect'],
     hasSubItems: true, panelId: 'departmentsMasterPanel',
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
+    inUseMessage: 'This department is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
   { key: 'categoryMasters',   label: 'Categories',  singular: 'category',   selects: ['fCategory','filterCategory'],
     hasSubItems: true, panelId: 'categoriesMasterPanel',
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
+    inUseMessage: 'This category is already in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.category === item.name) }
 ];
 let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [] };
@@ -646,8 +649,8 @@ function renderMasterItemRow(mt, item, all){
         ${mt.hasSubItems ? `<span class="master-chevron">${chevron}</span>` : ''}${escapeHtml(item.name)}${children.length ? `<span class="master-subcount">${children.length}</span>` : ''}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}
       </span>
       <div class="master-row-actions">
-        <button class="icon-btn-sm" onclick="startMasterEdit('${mt.key}','${item.id}')" title="${inUse?'In use — rename disabled':'Edit'}" ${inUse?'disabled':''}>&#9998;</button>
-        <button class="icon-btn-sm" onclick="removeMasterEntry('${mt.key}','${item.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&times;</button>
+        <button class="icon-btn-sm" onclick="startMasterEdit('${mt.key}','${item.id}')" title="${inUse?'In use — rename disabled':'Edit'}" ${inUse?'disabled':''}>&#9999;&#65039;</button>
+        <button class="icon-btn-sm" onclick="removeMasterEntry('${mt.key}','${item.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&#128465;&#65039;</button>
       </div>
     </div>`;
     if(mt.hasSubItems && isOpen){
@@ -733,7 +736,9 @@ function addSubMasterEntry(typeKey, parentId){
 function removeMasterEntry(typeKey, id){
   const mt = MASTER_TYPES.find(m => m.key === typeKey);
   const item = mastersData[typeKey].find(it => it.id === id);
-  if(item && mt.isInUse(item)){ toast("This entry is used by an existing document and can't be deleted.", 'err'); return; }
+  if(!item) return;
+  if(mt.isInUse(item)){ toast(mt.inUseMessage, 'err'); return; }
+  if(!confirm(`Are you sure you want to delete this ${mt.singular}?\n\n"${item.name}"`)) return;
   // Cascade — remove any sub-items nested under this one too, so nothing
   // gets orphaned and invisible. (Sub-items aren't currently referenced by
   // any document, so no usage-check is needed for them specifically.)
@@ -801,8 +806,8 @@ function renderRolesMasterView(){
   const adminRow = `<div class="master-item-wrap"><div class="master-item">
       <span style="display:flex; align-items:center; gap:6px; flex:1;">Admin <span class="master-builtin-tag">Built-in</span></span>
       <div class="master-row-actions">
-        <button class="icon-btn-sm" disabled title="Built-in — can't be edited">&#9998;</button>
-        <button class="icon-btn-sm" disabled title="Built-in — can't be deleted">&times;</button>
+        <button class="icon-btn-sm" disabled title="Built-in — can't be edited">&#9999;&#65039;</button>
+        <button class="icon-btn-sm" disabled title="Built-in — can't be deleted">&#128465;&#65039;</button>
       </div>
     </div></div>`;
   const customRows = roleMastersData.map(r => renderRoleRow(r)).join('');
@@ -826,8 +831,8 @@ function renderRoleRow(r){
   return `<div class="master-item-wrap"><div class="master-item">
     <span style="flex:1;">${escapeHtml(r.name)}${r.department ? `<span style="color:var(--text-muted); font-weight:400; font-size:12px;"> &middot; ${escapeHtml(r.department)}</span>` : ''}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}</span>
     <div class="master-row-actions">
-      <button class="icon-btn-sm" onclick="startRoleEdit('${r.id}')" title="Edit">&#9998;</button>
-      <button class="icon-btn-sm" onclick="removeRole('${r.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&times;</button>
+      <button class="icon-btn-sm" onclick="startRoleEdit('${r.id}')" title="Edit">&#9999;&#65039;</button>
+      <button class="icon-btn-sm" onclick="removeRole('${r.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&#128465;&#65039;</button>
     </div>
   </div></div>`;
 }
@@ -868,7 +873,10 @@ function submitCreateRole(){
     .catch(err => toast('Could not create: ' + err.message, 'err'));
 }
 function removeRole(id){
-  if(isRoleInUse(id)){ toast("This role is assigned to a user or workflow step and can't be deleted.", 'err'); return; }
+  const role = roleMastersData.find(r => r.id === id);
+  if(!role) return;
+  if(isRoleInUse(id)){ toast('This role is assigned to one or more users and cannot be deleted.', 'err'); return; }
+  if(!confirm(`Are you sure you want to delete this role?\n\n"${role.name}"`)) return;
   db.collection('roleMasters').doc(id).delete()
     .then(() => toast('Role removed.', 'ok'))
     .catch(err => toast('Could not remove: ' + err.message, 'err'));
@@ -922,7 +930,7 @@ function renderWorkflowConfigView(){
     const rows = stepsInStage.map(s => `
       <div class="master-item">
         <span>${escapeHtml(s.label)} <span style="color:var(--text-muted); font-weight:400;">&middot; ${escapeHtml(ROLE_LABELS[s.role]||s.role)}</span></span>
-        <button onclick="removeWorkflowStep('${s.key}')" title="Remove">&times;</button>
+        <button onclick="removeWorkflowStep('${s.key}')" title="Remove">&#128465;&#65039;</button>
       </div>`).join('');
     return `<div class="workflow-stage-block">
       <h4>Stage ${stageNum+1}${stepsInStage.length > 1 ? ' <span style="font-weight:400; color:var(--text-muted); font-size:12px;">&middot; parallel, all must approve</span>' : ''}</h4>
