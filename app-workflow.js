@@ -194,6 +194,7 @@ function listenAllDocuments(){
     allDocsSnapshot = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderDocsTable();
     renderQueue();
+    refreshMasterDataPanels(); // "in use" status depends on this data
   }, err => {
     console.error('documents listener:', err);
     document.getElementById('docsTableBody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load documents</b></div></td></tr>`;
@@ -565,24 +566,43 @@ function submitResubmission(){
 ============================================================ */
 const MASTER_TYPES = [
   { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
-    starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'] },
+    hasSubItems: true, panelId: 'projectsMasterPanel',
+    starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
+    isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
   { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment'],
-    starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'] },
+    hasSubItems: true, panelId: 'departmentsMasterPanel',
+    starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
+    isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
   { key: 'categoryMasters',   label: 'Categories',  singular: 'category',   selects: ['fCategory','filterCategory'],
-    starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'] }
+    hasSubItems: true, panelId: 'categoriesMasterPanel',
+    starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
+    isInUse: item => allDocsSnapshot.some(d => d.category === item.name) }
 ];
 let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [] };
 let expandedMasterItems = { projectMasters: new Set(), departmentMasters: new Set(), categoryMasters: new Set() };
+let editingMasterItem = null; // { typeKey, id }
 
 function listenMasters(){
   MASTER_TYPES.forEach(mt => {
-    db.collection(mt.key).orderBy('name').onSnapshot(snap => {
+    const unsub = db.collection(mt.key).orderBy('name').onSnapshot(snap => {
       mastersData[mt.key] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const topLevel = mastersData[mt.key].filter(it => !it.parentId);
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
-      if(currentUser && currentUser.role === 'admin') renderMastersView();
+      refreshMasterDataPanels();
     }, err => console.error(mt.key + ' listener:', err));
+    // Only track for teardown when running post-login (masters also load
+    // pre-login for the old registration screen's use case — harmless to
+    // leave that particular use unsubscribed, it's a one-time public read).
+    if(currentUser) activeSessionUnsubs.push(unsub);
   });
+}
+
+// Re-renders whichever master-data admin panels are currently relevant.
+// Called whenever the underlying master lists, documents, or users change,
+// since "is this entry in use" depends on documents/users data too.
+function refreshMasterDataPanels(){
+  if(!(currentUser && currentUser.role === 'admin')) return;
+  MASTER_TYPES.forEach(mt => renderSingleMasterPanel(mt));
 }
 
 function populateSelect(selectId, items){
@@ -594,53 +614,92 @@ function populateSelect(selectId, items){
   if(items.some(it => it.name === prevValue)) sel.value = prevValue;
 }
 
-function renderMastersView(){
-  const grid = document.getElementById('mastersGrid');
-  if(!grid) return;
-  grid.innerHTML = MASTER_TYPES.map(mt => {
-    const all = mastersData[mt.key];
-    const topLevel = all.filter(it => !it.parentId);
-    const listHtml = topLevel.length
-      ? topLevel.map(it => renderMasterItemRow(mt, it, all)).join('')
-      : `<div class="master-empty">No entries yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedMasterDefaults('${mt.key}')">Load starter list (${mt.starter.length})</button></div>`;
-    return `<div class="master-card">
-      <h4>${mt.label}</h4>
-      <div class="master-add-row">
-        <input type="text" id="new_${mt.key}" placeholder="Add ${mt.singular}&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addMasterEntry('${mt.key}');}">
-        <button class="btn btn-teal btn-sm" onclick="addMasterEntry('${mt.key}')">Add</button>
-      </div>
-      <div class="master-list">${listHtml}</div>
-    </div>`;
-  }).join('');
+function renderSingleMasterPanel(mt){
+  const panel = document.getElementById(mt.panelId);
+  if(!panel) return;
+  const all = mastersData[mt.key];
+  const topLevel = all.filter(it => !it.parentId);
+  const listHtml = topLevel.length
+    ? topLevel.map(it => renderMasterItemRow(mt, it, all)).join('')
+    : `<div class="master-empty">No entries yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedMasterDefaults('${mt.key}')">Load starter list (${mt.starter.length})</button></div>`;
+  panel.innerHTML = `
+    <div class="master-add-row" style="margin-bottom:16px;">
+      <input type="text" id="new_${mt.key}" placeholder="Add ${mt.singular}&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addMasterEntry('${mt.key}');}">
+      <button class="btn btn-teal btn-sm" onclick="addMasterEntry('${mt.key}')">Add</button>
+    </div>
+    <div class="master-list">${listHtml}</div>
+  `;
 }
 
 function renderMasterItemRow(mt, item, all){
-  const children = all.filter(it => it.parentId === item.id);
-  const isOpen = expandedMasterItems[mt.key].has(item.id);
-  const chevron = isOpen ? '&#9662;' : '&#9656;';
-  const childrenHtml = isOpen ? `
-    <div class="master-sublist">
-      ${children.map(c => `<div class="master-item master-subitem"><span>${escapeHtml(c.name)}</span><button onclick="removeMasterEntry('${mt.key}','${c.id}')" title="Remove">&times;</button></div>`).join('')}
-      <div class="master-add-row master-sub-add-row">
-        <input type="text" id="newsub_${mt.key}_${item.id}" placeholder="Add sub-item&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addSubMasterEntry('${mt.key}','${item.id}');}">
-        <button class="btn btn-ghost btn-sm" onclick="addSubMasterEntry('${mt.key}','${item.id}')">Add</button>
-      </div>
-    </div>` : '';
-  return `<div class="master-item-wrap">
-    <div class="master-item">
-      <span onclick="toggleMasterExpand('${mt.key}','${item.id}')" style="cursor:pointer; display:flex; align-items:center; gap:6px; flex:1;">
-        <span class="master-chevron">${chevron}</span>${escapeHtml(item.name)}${children.length ? `<span class="master-subcount">${children.length}</span>` : ''}
+  const inUse = mt.isInUse(item);
+  const isEditing = editingMasterItem && editingMasterItem.typeKey === mt.key && editingMasterItem.id === item.id;
+
+  let mainRow;
+  if(isEditing){
+    mainRow = `<div class="master-item master-item-editing">
+      <input type="text" id="editinput_${mt.key}_${item.id}" value="${escapeHtml(item.name)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault(); saveMasterEdit('${mt.key}','${item.id}');} if(event.key==='Escape'){cancelMasterEdit();}">
+      <button class="btn btn-teal btn-sm" onclick="saveMasterEdit('${mt.key}','${item.id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="cancelMasterEdit()">Cancel</button>
+    </div>`;
+  } else {
+    const children = all.filter(it => it.parentId === item.id);
+    const isOpen = expandedMasterItems[mt.key].has(item.id);
+    const chevron = isOpen ? '&#9662;' : '&#9656;';
+    mainRow = `<div class="master-item">
+      <span onclick="${mt.hasSubItems ? `toggleMasterExpand('${mt.key}','${item.id}')` : ''}" style="cursor:${mt.hasSubItems?'pointer':'default'}; display:flex; align-items:center; gap:6px; flex:1;">
+        ${mt.hasSubItems ? `<span class="master-chevron">${chevron}</span>` : ''}${escapeHtml(item.name)}${children.length ? `<span class="master-subcount">${children.length}</span>` : ''}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}
       </span>
-      <button onclick="removeMasterEntry('${mt.key}','${item.id}')" title="Remove">&times;</button>
-    </div>
-    ${childrenHtml}
-  </div>`;
+      <div class="master-row-actions">
+        <button class="icon-btn-sm" onclick="startMasterEdit('${mt.key}','${item.id}')" title="${inUse?'In use — rename disabled':'Edit'}" ${inUse?'disabled':''}>&#9998;</button>
+        <button class="icon-btn-sm" onclick="removeMasterEntry('${mt.key}','${item.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&times;</button>
+      </div>
+    </div>`;
+    if(mt.hasSubItems && isOpen){
+      const childrenHtml = `
+        <div class="master-sublist">
+          ${children.map(c => renderMasterItemRow(mt, c, all)).join('')}
+          <div class="master-add-row master-sub-add-row">
+            <input type="text" id="newsub_${mt.key}_${item.id}" placeholder="Add sub-item&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addSubMasterEntry('${mt.key}','${item.id}');}">
+            <button class="btn btn-ghost btn-sm" onclick="addSubMasterEntry('${mt.key}','${item.id}')">Add</button>
+          </div>
+        </div>`;
+      return `<div class="master-item-wrap">${mainRow}${childrenHtml}</div>`;
+    }
+  }
+  return `<div class="master-item-wrap">${mainRow}</div>`;
 }
 
 function toggleMasterExpand(typeKey, itemId){
   const set = expandedMasterItems[typeKey];
   if(set.has(itemId)) set.delete(itemId); else set.add(itemId);
-  renderMastersView();
+  refreshMasterDataPanels();
+}
+
+function startMasterEdit(typeKey, id){
+  const mt = MASTER_TYPES.find(m => m.key === typeKey);
+  const item = mastersData[typeKey].find(it => it.id === id);
+  if(item && mt.isInUse(item)){ toast("This entry is in use and can't be renamed — documents that reference it store the name directly.", 'err'); return; }
+  editingMasterItem = { typeKey, id };
+  refreshMasterDataPanels();
+  setTimeout(() => { const el = document.getElementById(`editinput_${typeKey}_${id}`); if(el){ el.focus(); el.select(); } }, 0);
+}
+function cancelMasterEdit(){
+  editingMasterItem = null;
+  refreshMasterDataPanels();
+}
+function saveMasterEdit(typeKey, id){
+  const input = document.getElementById(`editinput_${typeKey}_${id}`);
+  const name = input.value.trim();
+  if(!name){ toast('Name cannot be empty.', 'err'); return; }
+  const current = mastersData[typeKey].find(it => it.id === id);
+  const parentId = current ? (current.parentId || null) : null;
+  const dup = mastersData[typeKey].some(it => it.id !== id && (it.parentId || null) === parentId && it.name.toLowerCase() === name.toLowerCase());
+  if(dup){ toast('That name already exists.', 'err'); return; }
+  db.collection(typeKey).doc(id).update({ name })
+    .then(() => { editingMasterItem = null; toast('Saved.', 'ok'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
 
 function addMasterEntry(typeKey){
@@ -664,8 +723,12 @@ function addSubMasterEntry(typeKey, parentId){
     .catch(err => toast('Could not add: ' + err.message, 'err'));
 }
 function removeMasterEntry(typeKey, id){
+  const mt = MASTER_TYPES.find(m => m.key === typeKey);
+  const item = mastersData[typeKey].find(it => it.id === id);
+  if(item && mt.isInUse(item)){ toast("This entry is used by an existing document and can't be deleted.", 'err'); return; }
   // Cascade — remove any sub-items nested under this one too, so nothing
-  // gets orphaned and invisible.
+  // gets orphaned and invisible. (Sub-items aren't currently referenced by
+  // any document, so no usage-check is needed for them specifically.)
   const children = mastersData[typeKey].filter(it => it.parentId === id);
   const batch = db.batch();
   batch.delete(db.collection(typeKey).doc(id));
@@ -682,6 +745,133 @@ function seedMasterDefaults(typeKey){
   });
   batch.commit()
     .then(() => toast(`Loaded starter ${mt.label.toLowerCase()} list.`, 'ok'))
+    .catch(err => toast('Could not seed: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   ROLES (admin edits; live for everyone)
+   Unlike Projects/Departments/Categories, users and workflow steps store
+   the role's FIRESTORE ID (not its name) — so renaming a role is always
+   safe, even while in use; only DELETING an in-use role is blocked.
+   "Admin" is a hardcoded, built-in role (the security rules key off the
+   literal string 'admin' directly) and isn't stored in this collection —
+   it's shown as a protected, non-editable entry at the top of the list.
+============================================================ */
+let roleMastersData = [];
+let editingRoleId = null;
+
+function listenRoleMasters(){
+  const unsub = db.collection('roleMasters').orderBy('name').onSnapshot(snap => {
+    roleMastersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    ROLE_LABELS = { admin: 'Admin' };
+    roleMastersData.forEach(r => { ROLE_LABELS[r.id] = r.name; });
+    populateRoleSelects();
+    if(currentUser && currentUser.role === 'admin'){
+      renderRolesMasterView();
+      renderWorkflowConfigView(); // its role picker reflects ROLE_LABELS too
+    }
+  }, err => console.error('role masters listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function populateRoleSelects(){
+  const sel = document.getElementById('newUserRole');
+  if(!sel) return;
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">Select role&hellip;</option>' +
+    Object.entries(ROLE_LABELS).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('');
+  if(ROLE_LABELS[prevValue]) sel.value = prevValue;
+}
+
+function isRoleInUse(roleId){
+  return usersData.some(u => u.role === roleId) || WORKFLOW_STEPS.some(s => s.role === roleId);
+}
+
+function renderRolesMasterView(){
+  const panel = document.getElementById('rolesMasterPanel');
+  if(!panel) return;
+  const adminRow = `<div class="master-item-wrap"><div class="master-item">
+      <span style="display:flex; align-items:center; gap:6px; flex:1;">Admin <span class="master-builtin-tag">Built-in</span></span>
+      <div class="master-row-actions">
+        <button class="icon-btn-sm" disabled title="Built-in — can't be edited">&#9998;</button>
+        <button class="icon-btn-sm" disabled title="Built-in — can't be deleted">&times;</button>
+      </div>
+    </div></div>`;
+  const customRows = roleMastersData.map(r => renderRoleRow(r)).join('');
+  const emptyHint = roleMastersData.length === 0
+    ? `<div class="master-empty">No custom roles yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedDefaultRoles()">Load starter roles (${Object.keys(DEFAULT_ROLES).length})</button></div>`
+    : '';
+  panel.innerHTML = `
+    <div class="master-add-row" style="margin-bottom:16px;">
+      <input type="text" id="new_roleMasters" placeholder="Add role, e.g. Legal Reviewer&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addRole();}">
+      <button class="btn btn-teal btn-sm" onclick="addRole()">Add</button>
+    </div>
+    <div class="master-list">${adminRow}${customRows}${emptyHint}</div>
+  `;
+}
+
+function renderRoleRow(r){
+  const inUse = isRoleInUse(r.id);
+  const isEditing = editingRoleId === r.id;
+  if(isEditing){
+    return `<div class="master-item-wrap"><div class="master-item master-item-editing">
+      <input type="text" id="editrole_${r.id}" value="${escapeHtml(r.name)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault(); saveRoleEdit('${r.id}');} if(event.key==='Escape'){cancelRoleEdit();}">
+      <button class="btn btn-teal btn-sm" onclick="saveRoleEdit('${r.id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="cancelRoleEdit()">Cancel</button>
+    </div></div>`;
+  }
+  return `<div class="master-item-wrap"><div class="master-item">
+    <span style="flex:1;">${escapeHtml(r.name)}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}</span>
+    <div class="master-row-actions">
+      <button class="icon-btn-sm" onclick="startRoleEdit('${r.id}')" title="Edit">&#9998;</button>
+      <button class="icon-btn-sm" onclick="removeRole('${r.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&times;</button>
+    </div>
+  </div></div>`;
+}
+
+function startRoleEdit(id){
+  editingRoleId = id;
+  renderRolesMasterView();
+  setTimeout(() => { const el = document.getElementById('editrole_' + id); if(el){ el.focus(); el.select(); } }, 0);
+}
+function cancelRoleEdit(){
+  editingRoleId = null;
+  renderRolesMasterView();
+}
+function saveRoleEdit(id){
+  const input = document.getElementById('editrole_' + id);
+  const name = input.value.trim();
+  if(!name){ toast('Name cannot be empty.', 'err'); return; }
+  const dup = roleMastersData.some(r => r.id !== id && r.name.toLowerCase() === name.toLowerCase()) || name.toLowerCase() === 'admin';
+  if(dup){ toast('That role name is already in use.', 'err'); return; }
+  db.collection('roleMasters').doc(id).update({ name })
+    .then(() => { editingRoleId = null; toast('Saved.', 'ok'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function addRole(){
+  const input = document.getElementById('new_roleMasters');
+  const name = input.value.trim();
+  if(!name) return;
+  const dup = roleMastersData.some(r => r.name.toLowerCase() === name.toLowerCase()) || name.toLowerCase() === 'admin';
+  if(dup){ toast('That role already exists.', 'err'); return; }
+  db.collection('roleMasters').add({ name, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => { input.value = ''; toast('Role added.', 'ok'); })
+    .catch(err => toast('Could not add: ' + err.message, 'err'));
+}
+function removeRole(id){
+  if(isRoleInUse(id)){ toast("This role is assigned to a user or workflow step and can't be deleted.", 'err'); return; }
+  db.collection('roleMasters').doc(id).delete()
+    .then(() => toast('Role removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+function seedDefaultRoles(){
+  const batch = db.batch();
+  Object.entries(DEFAULT_ROLES).forEach(([id, name]) => {
+    batch.set(db.collection('roleMasters').doc(id), { name, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  });
+  batch.commit()
+    .then(() => toast('Starter roles loaded.', 'ok'))
     .catch(err => toast('Could not seed: ' + err.message, 'err'));
 }
 
@@ -829,7 +1019,11 @@ let usersData = [];
 function listenUsers(){
   const unsub = db.collection('users').orderBy('name').onSnapshot(snap => {
     usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if(currentUser && currentUser.role === 'admin') renderUsersView();
+    if(currentUser && currentUser.role === 'admin'){
+      renderUsersView();
+      refreshMasterDataPanels(); // department "in use" status depends on this data
+      renderRolesMasterView(); // role "in use" status depends on this data
+    }
   }, err => console.error('users listener:', err));
   activeSessionUnsubs.push(unsub);
 }
@@ -930,8 +1124,9 @@ function startListeners(){
   listenNotifications();
   listenWorkflowConfig();
   listenStatusLabels();
+  listenRoleMasters();
   if(currentUser.role === 'admin') listenUsers();
-  renderMastersView(); // in case this admin loaded masters before currentUser was set
+  refreshMasterDataPanels(); // in case this admin's panels were open before this fired
 }
 
 function stopSessionListeners(){
@@ -941,9 +1136,13 @@ function stopSessionListeners(){
   allDocsSnapshot = [];
   notifMap = new Map();
   usersData = [];
+  roleMastersData = [];
+  editingMasterItem = null;
+  editingRoleId = null;
   WORKFLOW_STEPS = DEFAULT_WORKFLOW_STEPS.slice();
   TOTAL_STAGES = new Set(DEFAULT_WORKFLOW_STEPS.map(s => s.stage)).size;
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
+  ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
 
 listenMasters(); // public read — populate registration + upload dropdowns even before sign-in
