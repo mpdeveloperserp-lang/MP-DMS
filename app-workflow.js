@@ -569,7 +569,7 @@ const MASTER_TYPES = [
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
     isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
-  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment'],
+  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect'],
     hasSubItems: true, panelId: 'departmentsMasterPanel',
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
     isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
@@ -622,13 +622,7 @@ function renderSingleMasterPanel(mt){
   const listHtml = topLevel.length
     ? topLevel.map(it => renderMasterItemRow(mt, it, all)).join('')
     : `<div class="master-empty">No entries yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedMasterDefaults('${mt.key}')">Load starter list (${mt.starter.length})</button></div>`;
-  panel.innerHTML = `
-    <div class="master-add-row" style="margin-bottom:16px;">
-      <input type="text" id="new_${mt.key}" placeholder="Add ${mt.singular}&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addMasterEntry('${mt.key}');}">
-      <button class="btn btn-teal btn-sm" onclick="addMasterEntry('${mt.key}')">Add</button>
-    </div>
-    <div class="master-list">${listHtml}</div>
-  `;
+  panel.innerHTML = `<div class="master-list">${listHtml}</div>`;
 }
 
 function renderMasterItemRow(mt, item, all){
@@ -702,15 +696,29 @@ function saveMasterEdit(typeKey, id){
     .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
 
-function addMasterEntry(typeKey){
-  const input = document.getElementById('new_' + typeKey);
-  const name = input.value.trim();
-  if(!name) return;
+let createMasterModalType = null;
+function openCreateMasterModal(typeKey){
+  createMasterModalType = typeKey;
+  const mt = MASTER_TYPES.find(m => m.key === typeKey);
+  const singularCap = mt.singular.charAt(0).toUpperCase() + mt.singular.slice(1);
+  document.getElementById('createMasterModalTitle').textContent = 'Create ' + singularCap;
+  document.getElementById('createMasterModalLabel').textContent = singularCap + ' name';
+  const input = document.getElementById('createMasterModalInput');
+  input.value = '';
+  input.placeholder = `e.g. ${mt.starter[0]}`;
+  document.getElementById('createMasterModalConfirmBtn').textContent = 'Create ' + singularCap;
+  openModal('createMasterModalOverlay');
+  setTimeout(() => input.focus(), 0);
+}
+function submitCreateMasterModal(){
+  const typeKey = createMasterModalType;
+  const name = document.getElementById('createMasterModalInput').value.trim();
+  if(!name){ toast('Please enter a name.', 'err'); return; }
   const existing = mastersData[typeKey].some(it => !it.parentId && it.name.toLowerCase() === name.toLowerCase());
   if(existing){ toast('That entry already exists.', 'err'); return; }
   db.collection(typeKey).add({ name, parentId: null, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
-    .then(() => { input.value = ''; toast('Added.', 'ok'); })
-    .catch(err => toast('Could not add: ' + err.message, 'err'));
+    .then(() => { toast('Created.', 'ok'); closeModal('createMasterModalOverlay'); })
+    .catch(err => toast('Could not create: ' + err.message, 'err'));
 }
 function addSubMasterEntry(typeKey, parentId){
   const input = document.getElementById(`newsub_${typeKey}_${parentId}`);
@@ -801,13 +809,7 @@ function renderRolesMasterView(){
   const emptyHint = roleMastersData.length === 0
     ? `<div class="master-empty">No custom roles yet.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="seedDefaultRoles()">Load starter roles (${Object.keys(DEFAULT_ROLES).length})</button></div>`
     : '';
-  panel.innerHTML = `
-    <div class="master-add-row" style="margin-bottom:16px;">
-      <input type="text" id="new_roleMasters" placeholder="Add role, e.g. Legal Reviewer&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addRole();}">
-      <button class="btn btn-teal btn-sm" onclick="addRole()">Add</button>
-    </div>
-    <div class="master-list">${adminRow}${customRows}${emptyHint}</div>
-  `;
+  panel.innerHTML = `<div class="master-list">${adminRow}${customRows}${emptyHint}</div>`;
 }
 
 function renderRoleRow(r){
@@ -822,7 +824,7 @@ function renderRoleRow(r){
     </div></div>`;
   }
   return `<div class="master-item-wrap"><div class="master-item">
-    <span style="flex:1;">${escapeHtml(r.name)}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}</span>
+    <span style="flex:1;">${escapeHtml(r.name)}${r.department ? `<span style="color:var(--text-muted); font-weight:400; font-size:12px;"> &middot; ${escapeHtml(r.department)}</span>` : ''}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}</span>
     <div class="master-row-actions">
       <button class="icon-btn-sm" onclick="startRoleEdit('${r.id}')" title="Edit">&#9998;</button>
       <button class="icon-btn-sm" onclick="removeRole('${r.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&times;</button>
@@ -849,15 +851,21 @@ function saveRoleEdit(id){
     .then(() => { editingRoleId = null; toast('Saved.', 'ok'); })
     .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
-function addRole(){
-  const input = document.getElementById('new_roleMasters');
-  const name = input.value.trim();
-  if(!name) return;
+function openCreateRoleModal(){
+  document.getElementById('createRoleNameInput').value = '';
+  document.getElementById('createRoleDeptSelect').value = '';
+  openModal('createRoleModalOverlay');
+  setTimeout(() => document.getElementById('createRoleNameInput').focus(), 0);
+}
+function submitCreateRole(){
+  const name = document.getElementById('createRoleNameInput').value.trim();
+  const department = document.getElementById('createRoleDeptSelect').value;
+  if(!name){ toast('Please enter a role name.', 'err'); return; }
   const dup = roleMastersData.some(r => r.name.toLowerCase() === name.toLowerCase()) || name.toLowerCase() === 'admin';
   if(dup){ toast('That role already exists.', 'err'); return; }
-  db.collection('roleMasters').add({ name, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
-    .then(() => { input.value = ''; toast('Role added.', 'ok'); })
-    .catch(err => toast('Could not add: ' + err.message, 'err'));
+  db.collection('roleMasters').add({ name, department: department || '', createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => { toast('Role created.', 'ok'); closeModal('createRoleModalOverlay'); })
+    .catch(err => toast('Could not create: ' + err.message, 'err'));
 }
 function removeRole(id){
   if(isRoleInUse(id)){ toast("This role is assigned to a user or workflow step and can't be deleted.", 'err'); return; }
