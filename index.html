@@ -643,6 +643,36 @@
   </div>
 </div>
 
+<!-- ---------------- EDIT USER MODAL (admin only) ---------------- -->
+<div class="modal-overlay" id="editUserModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Edit User</h3><button class="modal-close" onclick="closeModal('editUserModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Full name</label><input type="text" id="editUserName"></div>
+      <div class="field"><label>Email <span style="font-weight:400; color:var(--text-muted);">(can't be changed here)</span></label>
+        <input type="email" id="editUserEmail" disabled style="background:var(--bg); color:var(--text-muted);">
+      </div>
+      <div class="field"><label>Role</label><select id="editUserRole"></select></div>
+      <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <select id="editUserDept"><option value="">Select department&hellip; (or leave blank)</option></select>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="editUserStatus">
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        <div class="auth-hint hidden" id="editUserSelfNote" style="margin-top:6px;">You can't disable your own account.</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="sendUserPasswordReset()" style="margin-top:4px;">Send Password Reset Email</button>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('editUserModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="editUserConfirmBtn" onclick="submitEditUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- ---------------- CREATE PROJECT/DEPARTMENT/CATEGORY MODAL (admin only) ---------------- -->
 <div class="modal-overlay" id="createMasterModalOverlay">
   <div class="modal">
@@ -719,10 +749,10 @@ const DEFAULT_ROLES = {
   project_manager:'Project Manager', management:'Management'
 };
 const DEFAULT_WORKFLOW_STEPS = [
-  { key:'planning_review', label:'Planning Review', role:'planning_engineer', stage:0 },
-  { key:'qa_review',       label:'QA Review',        role:'qa_manager',        stage:0 },
-  { key:'pm_approval',     label:'Project Manager Approval', role:'project_manager', stage:1 },
-  { key:'mgmt_approval',   label:'Management Approval',      role:'management',      stage:2 }
+  { key:'planning_review', label:'Planning Review', role:'planning_engineer', stage:0, fromStatus:'pending_review', toStatus:'pending_review' },
+  { key:'qa_review',       label:'QA Review',        role:'qa_manager',        stage:0, fromStatus:'pending_review', toStatus:'pending_review' },
+  { key:'pm_approval',     label:'Project Manager Approval', role:'project_manager', stage:1, fromStatus:'pending_review', toStatus:'pending_approval' },
+  { key:'mgmt_approval',   label:'Management Approval',      role:'management',      stage:2, fromStatus:'pending_approval', toStatus:'approved' }
 ];
 const DEFAULT_STATUS_LABELS = {
   pending_review:'Pending Review', pending_approval:'Pending Approval',
