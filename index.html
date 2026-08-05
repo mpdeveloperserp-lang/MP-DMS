@@ -517,28 +517,28 @@
 
     <!-- ---------------- MANAGE PROJECTS VIEW (admin only) ---------------- -->
     <div class="view" id="projectsMasterView">
-      <div class="view-head"><h2>Manage Projects</h2></div>
+      <div class="view-head"><h2>Manage Projects</h2><button class="btn btn-teal" onclick="openCreateMasterModal('projectMasters')">+ Create Project</button></div>
       <div class="view-sub">Feeds the Project dropdown on Upload and the Documents filter. Click an entry to expand and add sub-items (e.g. towers/blocks) under it. Entries in use by an existing document can't be edited or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="projectsMasterPanel"></div>
     </div>
 
     <!-- ---------------- MANAGE DEPARTMENTS VIEW (admin only) ---------------- -->
     <div class="view" id="departmentsMasterView">
-      <div class="view-head"><h2>Manage Departments</h2></div>
+      <div class="view-head"><h2>Manage Departments</h2><button class="btn btn-teal" onclick="openCreateMasterModal('departmentMasters')">+ Create Department</button></div>
       <div class="view-sub">Feeds the Department dropdown on Upload, Create User, and the Documents filter. Entries in use can't be edited or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="departmentsMasterPanel"></div>
     </div>
 
     <!-- ---------------- MANAGE CATEGORIES VIEW (admin only) ---------------- -->
     <div class="view" id="categoriesMasterView">
-      <div class="view-head"><h2>Manage Categories</h2></div>
+      <div class="view-head"><h2>Manage Categories</h2><button class="btn btn-teal" onclick="openCreateMasterModal('categoryMasters')">+ Create Category</button></div>
       <div class="view-sub">Feeds the Category dropdown on Upload and the Documents filter. Click an entry to expand and add sub-items (e.g. document types) under it. Entries in use can't be edited or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="categoriesMasterPanel"></div>
     </div>
 
     <!-- ---------------- MANAGE ROLES VIEW (admin only) ---------------- -->
     <div class="view" id="rolesMasterView">
-      <div class="view-head"><h2>Manage Roles</h2></div>
+      <div class="view-head"><h2>Manage Roles</h2><button class="btn btn-teal" onclick="openCreateRoleModal()">+ Create Role</button></div>
       <div class="view-sub">Feeds the Role dropdown on Create User and Workflow Configuration. Renaming a role is always safe (accounts reference the role by ID, not name) &mdash; but a role assigned to an existing user or workflow step can't be deleted. <b>Admin</b> is a built-in role and can't be edited or removed.</div>
       <div class="card panel" style="max-width:640px;" id="rolesMasterPanel"></div>
     </div>
@@ -639,6 +639,37 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createUserModalOverlay')">Cancel</button>
       <button class="btn btn-teal" id="createUserConfirmBtn" onclick="submitCreateUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- CREATE PROJECT/DEPARTMENT/CATEGORY MODAL (admin only) ---------------- -->
+<div class="modal-overlay" id="createMasterModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="createMasterModalTitle">Create Entry</h3><button class="modal-close" onclick="closeModal('createMasterModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label id="createMasterModalLabel">Name</label><input type="text" id="createMasterModalInput" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitCreateMasterModal();}"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('createMasterModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="createMasterModalConfirmBtn" onclick="submitCreateMasterModal()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- CREATE ROLE MODAL (admin only) ---------------- -->
+<div class="modal-overlay" id="createRoleModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Create Role</h3><button class="modal-close" onclick="closeModal('createRoleModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Role name</label><input type="text" id="createRoleNameInput" placeholder="e.g. Legal Reviewer" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitCreateRole();}"></div>
+      <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <select id="createRoleDeptSelect"><option value="">Select department&hellip; (or leave blank)</option></select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('createRoleModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="createRoleConfirmBtn" onclick="submitCreateRole()">Create Role</button>
     </div>
   </div>
 </div>
