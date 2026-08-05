@@ -570,7 +570,7 @@ const MASTER_TYPES = [
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
     inUseMessage: 'This project is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
-  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect'],
+  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect','editUserDept'],
     hasSubItems: true, panelId: 'departmentsMasterPanel',
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
     inUseMessage: 'This department is in use and cannot be deleted.',
@@ -788,12 +788,15 @@ function listenRoleMasters(){
 }
 
 function populateRoleSelects(){
-  const sel = document.getElementById('newUserRole');
-  if(!sel) return;
-  const prevValue = sel.value;
-  sel.innerHTML = '<option value="">Select role&hellip;</option>' +
+  const optionsHtml = '<option value="">Select role&hellip;</option>' +
     Object.entries(ROLE_LABELS).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('');
-  if(ROLE_LABELS[prevValue]) sel.value = prevValue;
+  ['newUserRole', 'editUserRole'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    if(!sel) return;
+    const prevValue = sel.value;
+    sel.innerHTML = optionsHtml;
+    if(ROLE_LABELS[prevValue]) sel.value = prevValue;
+  });
 }
 
 function isRoleInUse(roleId){
@@ -907,7 +910,10 @@ function listenWorkflowConfig(){
     const raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     const distinctStages = [...new Set(raw.map(s => s.stage))].sort((a,b) => a-b);
     const stageMap = new Map(distinctStages.map((s,i) => [s,i]));
-    WORKFLOW_STEPS = raw.map(s => ({ key: s.id, label: s.label, role: s.role, stage: stageMap.get(s.stage) }));
+    WORKFLOW_STEPS = raw.map(s => ({
+      key: s.id, label: s.label || ROLE_LABELS[s.role] || s.role, role: s.role,
+      stage: stageMap.get(s.stage), fromStatus: s.fromStatus || '', toStatus: s.toStatus || ''
+    }));
     TOTAL_STAGES = distinctStages.length;
     if(currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
   }, err => console.error('workflow config listener:', err));
@@ -924,60 +930,81 @@ function renderWorkflowConfigView(){
     </div>`;
     return;
   }
-  const stageNumbers = [...new Set(WORKFLOW_STEPS.map(s => s.stage))].sort((a,b) => a-b);
-  const stagesHtml = stageNumbers.map(stageNum => {
-    const stepsInStage = WORKFLOW_STEPS.filter(s => s.stage === stageNum);
-    const rows = stepsInStage.map(s => `
-      <div class="master-item">
-        <span>${escapeHtml(s.label)} <span style="color:var(--text-muted); font-weight:400;">&middot; ${escapeHtml(ROLE_LABELS[s.role]||s.role)}</span></span>
-        <button onclick="removeWorkflowStep('${s.key}')" title="Remove">&#128465;&#65039;</button>
-      </div>`).join('');
-    return `<div class="workflow-stage-block">
-      <h4>Stage ${stageNum+1}${stepsInStage.length > 1 ? ' <span style="font-weight:400; color:var(--text-muted); font-size:12px;">&middot; parallel, all must approve</span>' : ''}</h4>
-      <div class="master-list">${rows}</div>
-    </div>`;
-  }).join('');
-  const maxStage = Math.max(...stageNumbers);
+  const sorted = [...WORKFLOW_STEPS].sort((a,b) => a.stage - b.stage);
+  const rows = sorted.map(s => `
+    <tr>
+      <td><span class="drawing-code">Stage ${s.stage + 1}</span></td>
+      <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
+      <td>${escapeHtml(STATUS_LABELS[s.fromStatus] || s.fromStatus || '—')}</td>
+      <td>${escapeHtml(STATUS_LABELS[s.toStatus] || s.toStatus || '—')}</td>
+      <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowStep('${s.key}')" title="Delete">&#128465;&#65039;</button></td>
+    </tr>`).join('');
+
+  const stageNumbers = [...new Set(WORKFLOW_STEPS.map(s => s.stage))].sort((a,b) => a - b);
+  const maxStage = stageNumbers.length ? Math.max(...stageNumbers) : -1;
+  const statusOptionsHtml = Object.keys(STATUS_LABELS).map(k => `<option value="${k}">${escapeHtml(STATUS_LABELS[k])}</option>`).join('');
 
   panel.innerHTML = `
-    ${stagesHtml}
-    <div class="workflow-add-block">
-      <h4>Add a step</h4>
+    <table>
+      <thead><tr><th>Stage</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="workflow-add-block" style="margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
+      <h4>Add Workflow Mapping</h4>
       <div class="workflow-add-row">
-        <input type="text" id="newStepLabel" placeholder="Step label, e.g. Legal Review">
+        <select id="newStepStage">
+          ${stageNumbers.map(n => `<option value="${n}">Stage ${n + 1} (parallel with existing)</option>`).join('')}
+          <option value="${maxStage + 1}" selected>New Stage ${maxStage + 2}</option>
+        </select>
         <select id="newStepRole">
           <option value="">Role&hellip;</option>
-          ${Object.entries(ROLE_LABELS).map(([k,v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
+          ${Object.entries(ROLE_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
         </select>
-        <select id="newStepStage">
-          ${stageNumbers.map(n => `<option value="${n}">Stage ${n+1} (parallel with existing)</option>`).join('')}
-          <option value="${maxStage+1}" selected>New stage after Stage ${maxStage+1}</option>
+        <select id="newStepFromStatus">
+          <option value="">From Status&hellip;</option>
+          ${statusOptionsHtml}
         </select>
-        <button class="btn btn-teal btn-sm" onclick="addWorkflowStep()">Add Step</button>
+        <select id="newStepToStatus">
+          <option value="">To Status&hellip;</option>
+          ${statusOptionsHtml}
+        </select>
+        <button class="btn btn-teal btn-sm" onclick="addWorkflowStep()">+ Add Mapping</button>
       </div>
+      <div class="auth-hint" style="margin-top:10px;">From/To Status document what each step represents for reference and reporting. The actual approval order and publishing still follow Stage order, exactly as before — this doesn't change how documents move through the chain.</div>
     </div>
   `;
 }
 
 function addWorkflowStep(){
-  const label = document.getElementById('newStepLabel').value.trim();
-  const role = document.getElementById('newStepRole').value;
   const stage = parseInt(document.getElementById('newStepStage').value, 10);
-  if(!label || !role){ toast('Please enter a label and choose a role.', 'err'); return; }
-  db.collection('workflowSteps').add({ label, role, stage, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
-    .then(() => toast('Step added.', 'ok'))
-    .catch(err => toast('Could not add step: ' + err.message, 'err'));
+  const role = document.getElementById('newStepRole').value;
+  const fromStatus = document.getElementById('newStepFromStatus').value;
+  const toStatus = document.getElementById('newStepToStatus').value;
+  if(!role){ toast('Please choose a role.', 'err'); return; }
+  if(!fromStatus || !toStatus){ toast('Please choose both From Status and To Status.', 'err'); return; }
+  const dup = WORKFLOW_STEPS.some(s => s.stage === stage && s.role === role);
+  if(dup){ toast('A mapping for this role already exists at this stage.', 'err'); return; }
+  const label = ROLE_LABELS[role] || role;
+  db.collection('workflowSteps').add({ label, role, stage, fromStatus, toStatus, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => toast('Mapping added.', 'ok'))
+    .catch(err => toast('Could not add: ' + err.message, 'err'));
 }
 function removeWorkflowStep(id){
   if(WORKFLOW_STEPS.length <= 1){ toast('At least one step is required — add a replacement before removing the last one.', 'err'); return; }
+  const step = WORKFLOW_STEPS.find(s => s.key === id);
+  const desc = step ? `${ROLE_LABELS[step.role] || step.role} — Stage ${step.stage + 1}` : 'this mapping';
+  if(!confirm(`Are you sure you want to remove this workflow mapping?\n\n"${desc}"`)) return;
   db.collection('workflowSteps').doc(id).delete()
-    .then(() => toast('Step removed.', 'ok'))
+    .then(() => toast('Mapping removed.', 'ok'))
     .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
 function seedDefaultWorkflow(){
   const batch = db.batch();
   DEFAULT_WORKFLOW_STEPS.forEach(s => {
-    batch.set(db.collection('workflowSteps').doc(), { label: s.label, role: s.role, stage: s.stage, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    batch.set(db.collection('workflowSteps').doc(), {
+      label: s.label, role: s.role, stage: s.stage, fromStatus: s.fromStatus, toStatus: s.toStatus,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
   });
   batch.commit()
     .then(() => toast('Starter workflow loaded.', 'ok'))
@@ -1032,6 +1059,7 @@ function saveStatusLabel(key){
    the new account, which is Firebase's normal (but unhelpful here) behavior.
 ============================================================ */
 let usersData = [];
+let editingUserId = null;
 function listenUsers(){
   const unsub = db.collection('users').orderBy('name').onSnapshot(snap => {
     usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1061,18 +1089,51 @@ function renderUsersView(){
       <td>${escapeHtml(u.department || '—')}</td>
       <td><span class="badge ${enabled ? 'st-published' : 'st-rejected'}"><span class="dot"></span>${enabled ? 'Enabled' : 'Disabled'}</span></td>
       <td style="text-align:right;">
-        ${isSelf
-          ? `<span style="font-size:11.5px; color:var(--text-muted);">This is you</span>`
-          : `<button class="btn btn-ghost btn-sm" onclick="toggleUserEnabled('${u.id}', ${enabled})">${enabled ? 'Disable' : 'Enable'}</button>`}
+        ${isSelf ? `<span style="font-size:11.5px; color:var(--text-muted); margin-right:8px;">This is you</span>` : ''}
+        <button class="icon-btn-sm" onclick="openEditUserModal('${u.id}')" title="Edit">&#9999;&#65039;</button>
       </td>
     </tr>`;
   }).join('');
 }
 
-function toggleUserEnabled(uid, currentlyEnabled){
-  db.collection('users').doc(uid).update({ enabled: !currentlyEnabled })
-    .then(() => toast(currentlyEnabled ? 'Account disabled.' : 'Account enabled.', 'ok'))
-    .catch(err => toast('Could not update: ' + err.message, 'err'));
+function openEditUserModal(uid){
+  const u = usersData.find(x => x.id === uid);
+  if(!u) return;
+  editingUserId = uid;
+  document.getElementById('editUserName').value = u.name || '';
+  document.getElementById('editUserEmail').value = u.email || '';
+  document.getElementById('editUserRole').value = u.role || '';
+  document.getElementById('editUserDept').value = u.department || '';
+  document.getElementById('editUserStatus').value = (u.enabled !== false) ? 'enabled' : 'disabled';
+  const isSelf = uid === currentUser.uid;
+  document.getElementById('editUserStatus').disabled = isSelf;
+  document.getElementById('editUserSelfNote').classList.toggle('hidden', !isSelf);
+  openModal('editUserModalOverlay');
+}
+
+function submitEditUser(){
+  const uid = editingUserId;
+  const name = document.getElementById('editUserName').value.trim();
+  const role = document.getElementById('editUserRole').value;
+  const department = document.getElementById('editUserDept').value;
+  const status = document.getElementById('editUserStatus').value;
+  if(!name || !role){ toast('Please fill in name and role.', 'err'); return; }
+  const updates = { name, role, department: department || '' };
+  if(uid !== currentUser.uid) updates.enabled = (status === 'enabled');
+  const btn = document.getElementById('editUserConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  db.collection('users').doc(uid).update(updates)
+    .then(() => { toast('User updated.', 'ok'); closeModal('editUserModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'))
+    .finally(() => { btn.disabled = false; btn.textContent = 'Save Changes'; });
+}
+
+function sendUserPasswordReset(){
+  const u = usersData.find(x => x.id === editingUserId);
+  if(!u || !u.email) return;
+  auth.sendPasswordResetEmail(u.email)
+    .then(() => toast(`Password reset email sent to ${u.email}.`, 'ok'))
+    .catch(err => toast('Could not send reset email: ' + err.message, 'err'));
 }
 
 function openCreateUserModal(){
