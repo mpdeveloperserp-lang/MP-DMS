@@ -515,6 +515,12 @@ function submitResubmission(){
 
   docRef.get().then(docSnap => {
     const docData = docSnap.data();
+    const resolved = resolveWorkflowForCategory(docData.category);
+    if(!resolved){
+      toast(`No workflow is configured for "${docData.category}" (and no Default workflow exists). Ask an Admin to set one up under Workflow Configuration.`, 'err');
+      btn.disabled = false; btn.textContent = 'Submit Revised Version';
+      return;
+    }
     return docRef.collection('versions').orderBy('versionNo','desc').limit(1).get().then(vs => {
       const oldVersionDoc = vs.docs[0];
       const newVersionNo = (oldVersionDoc.data().versionNo || 1) + 1;
@@ -531,7 +537,8 @@ function submitResubmission(){
           const versionData = {
             versionNo: newVersionNo, revision, fileName: resubFile.name, fileURL: url, filePath: storagePath,
             uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: ts,
-            status: 'pending_review', currentStage: 0, steps: freshSteps(),
+            status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
+            workflowConfigId: resolved.configId, workflowConfigName: resolved.configName,
             signedBy: null, signedAt: null, supersededBy: null,
             docTitle: docData.title, docDrawingNumber: docData.drawingNumber, docProject: docData.project, docId: activeDocId
           };
@@ -543,7 +550,7 @@ function submitResubmission(){
             action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null, toStatus: 'pending_review'
           });
           batch.commit().then(() => {
-            notifyRoles(WORKFLOW_STEPS.filter(s => s.stage === 0).map(s => s.role), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);
+            notifyRoles(resolved.steps.filter(s => s.stage === 0).map(s => s.role), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);
             toast('Revised version submitted for review.', 'ok');
             closeModal('resubmitModalOverlay');
             btn.disabled = false; btn.textContent = 'Submit Revised Version';
@@ -575,10 +582,10 @@ const MASTER_TYPES = [
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
     inUseMessage: 'This department is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
-  { key: 'categoryMasters',   label: 'Categories',  singular: 'category',   selects: ['fCategory','filterCategory'],
+  { key: 'categoryMasters',   label: 'Document Categories',  singular: 'document category',   selects: ['fCategory','filterCategory'],
     hasSubItems: true, panelId: 'categoriesMasterPanel',
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
-    inUseMessage: 'This category is already in use and cannot be deleted.',
+    inUseMessage: 'This document category is already in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.category === item.name) }
 ];
 let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [] };
@@ -800,7 +807,7 @@ function populateRoleSelects(){
 }
 
 function isRoleInUse(roleId){
-  return usersData.some(u => u.role === roleId) || WORKFLOW_STEPS.some(s => s.role === roleId);
+  return usersData.some(u => u.role === roleId) || workflowConfigStepsData.some(s => s.role === roleId);
 }
 
 function renderRolesMasterView(){
@@ -905,50 +912,130 @@ function seedDefaultRoles(){
    applyStepDecision / renderDetail, which read from each document's own
    frozen steps rather than this live config).
 ============================================================ */
-function listenWorkflowConfig(){
-  const unsub = db.collection('workflowSteps').orderBy('stage').onSnapshot(snap => {
-    const raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const distinctStages = [...new Set(raw.map(s => s.stage))].sort((a,b) => a-b);
-    const stageMap = new Map(distinctStages.map((s,i) => [s,i]));
-    WORKFLOW_STEPS = raw.map(s => ({
+/* ============================================================
+   WORKFLOW CONFIGURATIONS (admin edits; live for everyone)
+   Each Workflow Config has a name, an assigned Document Category (or
+   blank for "Default — applies to any category without its own config"),
+   and its own list of Stage/Role/From-To Status mappings. Documents
+   resolve which config applies from their own category at upload time
+   (resolveWorkflowForCategory) and freeze a copy of its steps — later
+   edits here never retroactively affect documents already in progress.
+============================================================ */
+let workflowConfigsData = [];       // [{id, name, category, createdAt}]
+let workflowConfigStepsData = [];   // [{id, configId, role, stage, fromStatus, toStatus, label}]
+let activeWorkflowConfigId = null;  // which config's detail view is open; null = list view
+
+function listenWorkflowConfigs(){
+  const unsub1 = db.collection('workflowConfigs').orderBy('name').onSnapshot(snap => {
+    workflowConfigsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    populateWorkflowCategorySelects();
+    if(currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+  }, err => console.error('workflowConfigs listener:', err));
+  const unsub2 = db.collection('workflowConfigSteps').onSnapshot(snap => {
+    workflowConfigStepsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+    updateUploadWorkflowHint();
+  }, err => console.error('workflowConfigSteps listener:', err));
+  activeSessionUnsubs.push(unsub1, unsub2);
+}
+
+// Finds the right workflow for a Document Category: an exact-category
+// match first, falling back to the Default config (category === '' / not
+// set) if no category-specific one exists. Returns null if genuinely
+// nothing applies — callers must handle that (blocks upload).
+function resolveWorkflowForCategory(category){
+  let config = workflowConfigsData.find(c => c.category === category);
+  if(!config) config = workflowConfigsData.find(c => !c.category);
+  if(!config) return null;
+  const raw = workflowConfigStepsData.filter(s => s.configId === config.id);
+  if(raw.length === 0) return null;
+  const distinctStages = [...new Set(raw.map(s => s.stage))].sort((a,b) => a - b);
+  const stageMap = new Map(distinctStages.map((s,i) => [s,i]));
+  return {
+    configId: config.id,
+    configName: config.name,
+    steps: raw.map(s => ({
       key: s.id, label: s.label || ROLE_LABELS[s.role] || s.role, role: s.role,
       stage: stageMap.get(s.stage), fromStatus: s.fromStatus || '', toStatus: s.toStatus || ''
-    }));
-    TOTAL_STAGES = distinctStages.length;
-    if(currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
-  }, err => console.error('workflow config listener:', err));
-  activeSessionUnsubs.push(unsub);
+    }))
+  };
+}
+
+function updateUploadWorkflowHint(){
+  const el = document.getElementById('uploadWorkflowHint');
+  if(!el) return;
+  const category = document.getElementById('fCategory') ? document.getElementById('fCategory').value : '';
+  if(!category){ el.innerHTML = ''; return; }
+  const resolved = resolveWorkflowForCategory(category);
+  el.innerHTML = resolved
+    ? `Workflow: <b>${escapeHtml(resolved.configName)}</b> (${resolved.steps.length} step${resolved.steps.length === 1 ? '' : 's'})`
+    : `<span style="color:var(--red);">No workflow configured for this category yet — ask an Admin.</span>`;
+}
+
+function populateWorkflowCategorySelects(){
+  const sel = document.getElementById('createWorkflowCategory');
+  if(!sel) return;
+  const prevValue = sel.value;
+  const topLevelCategories = mastersData.categoryMasters.filter(it => !it.parentId);
+  sel.innerHTML = '<option value="">Default (applies to any category without its own workflow)</option>' +
+    topLevelCategories.map(it => `<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)}</option>`).join('');
+  if(topLevelCategories.some(it => it.name === prevValue)) sel.value = prevValue;
 }
 
 function renderWorkflowConfigView(){
   const panel = document.getElementById('workflowConfigPanel');
   if(!panel) return;
-  if(WORKFLOW_STEPS.length === 0){
-    panel.innerHTML = `<div class="empty-state"><div class="ic">&#8942;</div><b>No workflow configured yet</b>
-      <div style="margin:8px 0 16px;">Uploads are blocked until at least one step exists.</div>
-      <button class="btn btn-teal btn-sm" onclick="seedDefaultWorkflow()">Load starter workflow (4 steps, 3 stages)</button>
+  if(activeWorkflowConfigId) renderWorkflowConfigDetail(panel);
+  else renderWorkflowConfigList(panel);
+}
+
+function renderWorkflowConfigList(panel){
+  if(workflowConfigsData.length === 0){
+    panel.innerHTML = `<div class="empty-state"><div class="ic">&#8942;</div><b>No workflows configured yet</b>
+      <div style="margin:8px 0 16px;">Uploads are blocked until at least one workflow exists — a Default one covers every Document Category until you add more specific ones.</div>
+      <button class="btn btn-teal btn-sm" onclick="seedDefaultWorkflow()">Load starter workflow (Default, 4 steps)</button>
     </div>`;
     return;
   }
-  const sorted = [...WORKFLOW_STEPS].sort((a,b) => a.stage - b.stage);
+  const rows = workflowConfigsData.map(c => {
+    const stepCount = workflowConfigStepsData.filter(s => s.configId === c.id).length;
+    return `<tr onclick="openWorkflowConfigDetail('${c.id}')">
+      <td>${escapeHtml(c.name)}</td>
+      <td>${c.category ? escapeHtml(c.category) : '<span style="color:var(--text-muted);">Default (any category)</span>'}</td>
+      <td>${stepCount} step${stepCount === 1 ? '' : 's'}</td>
+      <td style="text-align:right;" onclick="event.stopPropagation();">
+        <button class="icon-btn-sm" onclick="openWorkflowConfigDetail('${c.id}')" title="Edit">&#9999;&#65039;</button>
+        <button class="icon-btn-sm" onclick="deleteWorkflowConfig('${c.id}')" title="Delete">&#128465;&#65039;</button>
+      </td>
+    </tr>`;
+  }).join('');
+  panel.innerHTML = `<table><thead><tr><th>Workflow Name</th><th>Document Category</th><th>Steps</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderWorkflowConfigDetail(panel){
+  const config = workflowConfigsData.find(c => c.id === activeWorkflowConfigId);
+  if(!config){ activeWorkflowConfigId = null; renderWorkflowConfigList(panel); return; }
+  const stepsRaw = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
+  const sorted = [...stepsRaw].sort((a,b) => a.stage - b.stage);
   const rows = sorted.map(s => `
     <tr>
       <td><span class="drawing-code">Stage ${s.stage + 1}</span></td>
       <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
       <td>${escapeHtml(STATUS_LABELS[s.fromStatus] || s.fromStatus || '—')}</td>
       <td>${escapeHtml(STATUS_LABELS[s.toStatus] || s.toStatus || '—')}</td>
-      <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowStep('${s.key}')" title="Delete">&#128465;&#65039;</button></td>
+      <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
     </tr>`).join('');
 
-  const stageNumbers = [...new Set(WORKFLOW_STEPS.map(s => s.stage))].sort((a,b) => a - b);
+  const stageNumbers = [...new Set(stepsRaw.map(s => s.stage))].sort((a,b) => a - b);
   const maxStage = stageNumbers.length ? Math.max(...stageNumbers) : -1;
   const statusOptionsHtml = Object.keys(STATUS_LABELS).map(k => `<option value="${k}">${escapeHtml(STATUS_LABELS[k])}</option>`).join('');
 
   panel.innerHTML = `
-    <table>
-      <thead><tr><th>Stage</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <button class="btn btn-ghost btn-sm" onclick="backToWorkflowList()" style="margin-bottom:16px;">&larr; Back to Workflows</button>
+    <h3 style="margin-bottom:3px;">${escapeHtml(config.name)}</h3>
+    <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:18px;">${config.category ? `Applies to Document Category: <b>${escapeHtml(config.category)}</b>` : 'Default workflow — applies to any Document Category without its own workflow'}</div>
+    ${stepsRaw.length ? `<table><thead><tr><th>Stage</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<div class="master-empty">No steps yet — add at least one below.</div>`}
     <div class="workflow-add-block" style="margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
       <h4>Add Workflow Mapping</h4>
       <div class="workflow-add-row">
@@ -960,54 +1047,93 @@ function renderWorkflowConfigView(){
           <option value="">Role&hellip;</option>
           ${Object.entries(ROLE_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
         </select>
-        <select id="newStepFromStatus">
-          <option value="">From Status&hellip;</option>
-          ${statusOptionsHtml}
-        </select>
-        <select id="newStepToStatus">
-          <option value="">To Status&hellip;</option>
-          ${statusOptionsHtml}
-        </select>
-        <button class="btn btn-teal btn-sm" onclick="addWorkflowStep()">+ Add Mapping</button>
+        <select id="newStepFromStatus"><option value="">From Status&hellip;</option>${statusOptionsHtml}</select>
+        <select id="newStepToStatus"><option value="">To Status&hellip;</option>${statusOptionsHtml}</select>
+        <button class="btn btn-teal btn-sm" onclick="addWorkflowConfigStep()">+ Add Mapping</button>
       </div>
-      <div class="auth-hint" style="margin-top:10px;">From/To Status document what each step represents for reference and reporting. The actual approval order and publishing still follow Stage order, exactly as before — this doesn't change how documents move through the chain.</div>
+      <div class="auth-hint" style="margin-top:10px;">From/To Status document what each step represents for reference and reporting. The actual approval order and publishing still follow Stage order within this workflow.</div>
     </div>
   `;
 }
 
-function addWorkflowStep(){
+function openWorkflowConfigDetail(configId){
+  activeWorkflowConfigId = configId;
+  renderWorkflowConfigView();
+}
+function backToWorkflowList(){
+  activeWorkflowConfigId = null;
+  renderWorkflowConfigView();
+}
+
+function openCreateWorkflowModal(){
+  document.getElementById('createWorkflowName').value = '';
+  populateWorkflowCategorySelects();
+  document.getElementById('createWorkflowCategory').value = '';
+  openModal('createWorkflowModalOverlay');
+  setTimeout(() => document.getElementById('createWorkflowName').focus(), 0);
+}
+function submitCreateWorkflow(){
+  const name = document.getElementById('createWorkflowName').value.trim();
+  const category = document.getElementById('createWorkflowCategory').value;
+  if(!name){ toast('Please enter a workflow name.', 'err'); return; }
+  const dup = category
+    ? workflowConfigsData.some(c => c.category === category)
+    : workflowConfigsData.some(c => !c.category);
+  if(dup){ toast(category ? 'A workflow already exists for this Document Category.' : 'A Default workflow already exists.', 'err'); return; }
+  db.collection('workflowConfigs').add({ name, category, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(ref => { toast('Workflow created.', 'ok'); closeModal('createWorkflowModalOverlay'); openWorkflowConfigDetail(ref.id); })
+    .catch(err => toast('Could not create: ' + err.message, 'err'));
+}
+function deleteWorkflowConfig(configId){
+  const config = workflowConfigsData.find(c => c.id === configId);
+  if(!config) return;
+  const steps = workflowConfigStepsData.filter(s => s.configId === configId);
+  if(!confirm(`Are you sure you want to delete this workflow?\n\n"${config.name}"${steps.length ? `\n\nThis also removes its ${steps.length} mapping${steps.length === 1 ? '' : 's'}.` : ''}`)) return;
+  const batch = db.batch();
+  batch.delete(db.collection('workflowConfigs').doc(configId));
+  steps.forEach(s => batch.delete(db.collection('workflowConfigSteps').doc(s.id)));
+  batch.commit()
+    .then(() => { toast('Workflow deleted.', 'ok'); if(activeWorkflowConfigId === configId) backToWorkflowList(); })
+    .catch(err => toast('Could not delete: ' + err.message, 'err'));
+}
+
+function addWorkflowConfigStep(){
+  const configId = activeWorkflowConfigId;
   const stage = parseInt(document.getElementById('newStepStage').value, 10);
   const role = document.getElementById('newStepRole').value;
   const fromStatus = document.getElementById('newStepFromStatus').value;
   const toStatus = document.getElementById('newStepToStatus').value;
   if(!role){ toast('Please choose a role.', 'err'); return; }
   if(!fromStatus || !toStatus){ toast('Please choose both From Status and To Status.', 'err'); return; }
-  const dup = WORKFLOW_STEPS.some(s => s.stage === stage && s.role === role);
-  if(dup){ toast('A mapping for this role already exists at this stage.', 'err'); return; }
+  const dup = workflowConfigStepsData.some(s => s.configId === configId && s.stage === stage && s.role === role);
+  if(dup){ toast('A mapping for this role already exists at this stage in this workflow.', 'err'); return; }
   const label = ROLE_LABELS[role] || role;
-  db.collection('workflowSteps').add({ label, role, stage, fromStatus, toStatus, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+  db.collection('workflowConfigSteps').add({ configId, label, role, stage, fromStatus, toStatus, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
     .then(() => toast('Mapping added.', 'ok'))
     .catch(err => toast('Could not add: ' + err.message, 'err'));
 }
-function removeWorkflowStep(id){
-  if(WORKFLOW_STEPS.length <= 1){ toast('At least one step is required — add a replacement before removing the last one.', 'err'); return; }
-  const step = WORKFLOW_STEPS.find(s => s.key === id);
+function removeWorkflowConfigStep(stepId){
+  const configSteps = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
+  if(configSteps.length <= 1){ toast('At least one step is required in a workflow — add a replacement before removing the last one.', 'err'); return; }
+  const step = configSteps.find(s => s.id === stepId);
   const desc = step ? `${ROLE_LABELS[step.role] || step.role} — Stage ${step.stage + 1}` : 'this mapping';
   if(!confirm(`Are you sure you want to remove this workflow mapping?\n\n"${desc}"`)) return;
-  db.collection('workflowSteps').doc(id).delete()
+  db.collection('workflowConfigSteps').doc(stepId).delete()
     .then(() => toast('Mapping removed.', 'ok'))
     .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
 function seedDefaultWorkflow(){
+  const configRef = db.collection('workflowConfigs').doc();
   const batch = db.batch();
+  batch.set(configRef, { name: 'Default Workflow', category: '', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   DEFAULT_WORKFLOW_STEPS.forEach(s => {
-    batch.set(db.collection('workflowSteps').doc(), {
-      label: s.label, role: s.role, stage: s.stage, fromStatus: s.fromStatus, toStatus: s.toStatus,
+    batch.set(db.collection('workflowConfigSteps').doc(), {
+      configId: configRef.id, label: s.label, role: s.role, stage: s.stage, fromStatus: s.fromStatus, toStatus: s.toStatus,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   });
   batch.commit()
-    .then(() => toast('Starter workflow loaded.', 'ok'))
+    .then(() => { toast('Starter workflow loaded.', 'ok'); openWorkflowConfigDetail(configRef.id); })
     .catch(err => toast('Could not seed: ' + err.message, 'err'));
 }
 
@@ -1199,7 +1325,7 @@ function startListeners(){
   listenQueue();
   listenAllDocuments();
   listenNotifications();
-  listenWorkflowConfig();
+  listenWorkflowConfigs();
   listenStatusLabels();
   listenRoleMasters();
   if(currentUser.role === 'admin') listenUsers();
@@ -1216,8 +1342,9 @@ function stopSessionListeners(){
   roleMastersData = [];
   editingMasterItem = null;
   editingRoleId = null;
-  WORKFLOW_STEPS = DEFAULT_WORKFLOW_STEPS.slice();
-  TOTAL_STAGES = new Set(DEFAULT_WORKFLOW_STEPS.map(s => s.stage)).size;
+  workflowConfigsData = [];
+  workflowConfigStepsData = [];
+  activeWorkflowConfigId = null;
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
