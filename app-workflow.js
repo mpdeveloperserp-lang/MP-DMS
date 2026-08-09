@@ -779,6 +779,8 @@ function seedMasterDefaults(typeKey){
 ============================================================ */
 let roleMastersData = [];
 let editingRoleId = null;
+let customStatusesData = [];
+let editingCustomStatusId = null;
 
 function listenRoleMasters(){
   const unsub = db.collection('roleMasters').orderBy('name').onSnapshot(snap => {
@@ -1015,20 +1017,21 @@ function renderWorkflowConfigList(panel){
 function renderWorkflowConfigDetail(panel){
   const config = workflowConfigsData.find(c => c.id === activeWorkflowConfigId);
   if(!config){ activeWorkflowConfigId = null; renderWorkflowConfigList(panel); return; }
+  const allStatusOptions = getAllStatusOptions();
   const stepsRaw = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
   const sorted = [...stepsRaw].sort((a,b) => a.stage - b.stage);
   const rows = sorted.map(s => `
     <tr>
       <td><span class="drawing-code">Stage ${s.stage + 1}</span></td>
       <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
-      <td>${escapeHtml(STATUS_LABELS[s.fromStatus] || s.fromStatus || '—')}</td>
-      <td>${escapeHtml(STATUS_LABELS[s.toStatus] || s.toStatus || '—')}</td>
+      <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
+      <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
       <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
     </tr>`).join('');
 
   const stageNumbers = [...new Set(stepsRaw.map(s => s.stage))].sort((a,b) => a - b);
   const maxStage = stageNumbers.length ? Math.max(...stageNumbers) : -1;
-  const statusOptionsHtml = Object.keys(STATUS_LABELS).map(k => `<option value="${k}">${escapeHtml(STATUS_LABELS[k])}</option>`).join('');
+  const statusOptionsHtml = Object.entries(allStatusOptions).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('');
 
   panel.innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="backToWorkflowList()" style="margin-bottom:16px;">&larr; Back to Workflows</button>
@@ -1143,7 +1146,7 @@ function seedDefaultWorkflow(){
    engine's logic) — this only lets an Admin rename how each one displays.
 ============================================================ */
 function listenStatusLabels(){
-  const unsub = db.collection('statusLabels').onSnapshot(snap => {
+  const unsub1 = db.collection('statusLabels').onSnapshot(snap => {
     const overrides = {};
     snap.docs.forEach(d => { overrides[d.id] = d.data().label; });
     STATUS_LABELS = { ...DEFAULT_STATUS_LABELS, ...overrides };
@@ -1152,19 +1155,67 @@ function listenStatusLabels(){
     renderDocsTable();
     renderQueue();
   }, err => console.error('status labels listener:', err));
-  activeSessionUnsubs.push(unsub);
+  const unsub2 = db.collection('customStatuses').orderBy('name').onSnapshot(snap => {
+    customStatusesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin'){
+      renderStatusConfigView();
+      renderWorkflowConfigView(); // its From/To Status pickers include custom statuses too
+    }
+  }, err => console.error('custom statuses listener:', err));
+  activeSessionUnsubs.push(unsub1, unsub2);
+}
+
+// Combines the 5 built-in (real, engine-driving) statuses with admin-created
+// custom ones, for use ONLY in Workflow Configuration's From/To Status
+// pickers — those fields are documentation/reference on each step, not the
+// actual value stored in a document's own status field, so mixing in
+// custom entries here is safe and doesn't touch the real state machine.
+function getAllStatusOptions(){
+  const combined = { ...STATUS_LABELS };
+  customStatusesData.forEach(c => { combined[c.id] = c.name; });
+  return combined;
+}
+
+function isCustomStatusInUse(statusId){
+  return workflowConfigStepsData.some(s => s.fromStatus === statusId || s.toStatus === statusId);
 }
 
 function renderStatusConfigView(){
   const panel = document.getElementById('statusConfigPanel');
   if(!panel) return;
-  panel.innerHTML = Object.keys(DEFAULT_STATUS_LABELS).map(key => `
+  const builtInRows = Object.keys(DEFAULT_STATUS_LABELS).map(key => `
     <div class="status-edit-row">
-      <span class="status-key">${key}</span>
+      <span class="status-key">${key} <span class="master-builtin-tag">Built-in</span></span>
       <input type="text" id="statuslabel_${key}" value="${escapeHtml(STATUS_LABELS[key])}">
       <button class="btn btn-teal btn-sm" onclick="saveStatusLabel('${key}')">Save</button>
     </div>
   `).join('');
+  const customRows = customStatusesData.map(c => renderCustomStatusRow(c)).join('');
+  panel.innerHTML = `
+    <div style="margin-bottom:6px;"><b style="font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">Built-in statuses</b></div>
+    ${builtInRows}
+    <div style="margin:22px 0 10px;"><b style="font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">Custom statuses</b></div>
+    <div class="auth-hint" style="margin-bottom:14px;">Custom statuses are available as From/To Status options in Workflow Configuration for documentation and reporting. They aren't states a document can actually be in — that's still driven by the 5 built-in statuses above.</div>
+    ${customRows || '<div class="master-empty">No custom statuses yet.</div>'}
+  `;
+}
+
+function renderCustomStatusRow(c){
+  const inUse = isCustomStatusInUse(c.id);
+  const isEditing = editingCustomStatusId === c.id;
+  if(isEditing){
+    return `<div class="status-edit-row">
+      <input type="text" id="editcustomstatus_${c.id}" value="${escapeHtml(c.name)}" style="max-width:none; flex:1;"
+        onkeydown="if(event.key==='Enter'){event.preventDefault(); saveCustomStatusEdit('${c.id}');} if(event.key==='Escape'){cancelCustomStatusEdit();}">
+      <button class="btn btn-teal btn-sm" onclick="saveCustomStatusEdit('${c.id}')">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="cancelCustomStatusEdit()">Cancel</button>
+    </div>`;
+  }
+  return `<div class="status-edit-row">
+    <span class="status-key" style="width:auto; flex:1; font-family:var(--body); font-size:13px; color:var(--text);">${escapeHtml(c.name)}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}</span>
+    <button class="icon-btn-sm" onclick="startCustomStatusEdit('${c.id}')" title="Edit">&#9999;&#65039;</button>
+    <button class="icon-btn-sm" onclick="removeCustomStatus('${c.id}')" title="${inUse ? 'In use — delete disabled' : 'Delete'}" ${inUse ? 'disabled' : ''}>&#128465;&#65039;</button>
+  </div>`;
 }
 
 function saveStatusLabel(key){
@@ -1174,6 +1225,50 @@ function saveStatusLabel(key){
   db.collection('statusLabels').doc(key).set({ label })
     .then(() => toast('Saved.', 'ok'))
     .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
+function openCreateStatusModal(){
+  document.getElementById('createStatusName').value = '';
+  openModal('createStatusModalOverlay');
+  setTimeout(() => document.getElementById('createStatusName').focus(), 0);
+}
+function submitCreateStatus(){
+  const name = document.getElementById('createStatusName').value.trim();
+  if(!name){ toast('Please enter a status name.', 'err'); return; }
+  const dup = customStatusesData.some(c => c.name.toLowerCase() === name.toLowerCase()) ||
+    Object.values(DEFAULT_STATUS_LABELS).some(v => v.toLowerCase() === name.toLowerCase());
+  if(dup){ toast('That status already exists.', 'err'); return; }
+  db.collection('customStatuses').add({ name, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => { toast('Status created.', 'ok'); closeModal('createStatusModalOverlay'); })
+    .catch(err => toast('Could not create: ' + err.message, 'err'));
+}
+function startCustomStatusEdit(id){
+  editingCustomStatusId = id;
+  renderStatusConfigView();
+  setTimeout(() => { const el = document.getElementById('editcustomstatus_' + id); if(el){ el.focus(); el.select(); } }, 0);
+}
+function cancelCustomStatusEdit(){
+  editingCustomStatusId = null;
+  renderStatusConfigView();
+}
+function saveCustomStatusEdit(id){
+  const input = document.getElementById('editcustomstatus_' + id);
+  const name = input.value.trim();
+  if(!name){ toast('Name cannot be empty.', 'err'); return; }
+  const dup = customStatusesData.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase());
+  if(dup){ toast('That status already exists.', 'err'); return; }
+  db.collection('customStatuses').doc(id).update({ name })
+    .then(() => { editingCustomStatusId = null; toast('Saved.', 'ok'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function removeCustomStatus(id){
+  const c = customStatusesData.find(x => x.id === id);
+  if(!c) return;
+  if(isCustomStatusInUse(id)){ toast('This status is used in a workflow mapping and cannot be deleted.', 'err'); return; }
+  if(!confirm(`Are you sure you want to delete this status?\n\n"${c.name}"`)) return;
+  db.collection('customStatuses').doc(id).delete()
+    .then(() => toast('Status removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
 
 /* ============================================================
@@ -1345,6 +1440,8 @@ function stopSessionListeners(){
   workflowConfigsData = [];
   workflowConfigStepsData = [];
   activeWorkflowConfigId = null;
+  customStatusesData = [];
+  editingCustomStatusId = null;
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
