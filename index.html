@@ -553,8 +553,8 @@
 
     <!-- ---------------- STATUS LABELS VIEW (admin only) ---------------- -->
     <div class="view" id="statusConfigView">
-      <div class="view-head"><h2>Status Labels</h2></div>
-      <div class="view-sub">Rename how each lifecycle status is displayed across the app &mdash; the underlying stages stay the same, only the wording changes.</div>
+      <div class="view-head"><h2>Status Labels</h2><button class="btn btn-teal" onclick="openCreateStatusModal()">+ Create Status</button></div>
+      <div class="view-sub">The 5 built-in statuses drive the real document lifecycle &mdash; you can rename their display text but not remove them. Custom statuses are additional reference values usable in Workflow Configuration's From/To Status mappings.</div>
       <div class="card panel" id="statusConfigPanel"></div>
     </div>
 
@@ -640,6 +640,21 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createUserModalOverlay')">Cancel</button>
       <button class="btn btn-teal" id="createUserConfirmBtn" onclick="submitCreateUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- CREATE STATUS MODAL (admin only) ---------------- -->
+<div class="modal-overlay" id="createStatusModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Create Status</h3><button class="modal-close" onclick="closeModal('createStatusModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Status name</label><input type="text" id="createStatusName" placeholder="e.g. Under Legal Review" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitCreateStatus();}"></div>
+      <div class="auth-hint">This becomes available as a From/To Status option in Workflow Configuration mappings &mdash; it's a reference label, not an actual state a document can be in.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('createStatusModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" onclick="submitCreateStatus()">Create Status</button>
     </div>
   </div>
 </div>
