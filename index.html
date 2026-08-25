@@ -547,7 +547,7 @@
     <!-- ---------------- WORKFLOW CONFIGURATION VIEW (admin only) ---------------- -->
     <div class="view" id="workflowConfigView">
       <div class="view-head"><h2>Workflow Configuration</h2><button class="btn btn-teal" onclick="openCreateWorkflowModal()">+ Create Workflow</button></div>
-      <div class="view-sub">Each Document Category can have its own approval workflow &mdash; or share a Default one. Within a workflow, steps sharing the same stage number run in parallel; different stage numbers run sequentially in order. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
+      <div class="view-sub">Each Document Category can have its own approval workflow &mdash; or share a Default one. Within a workflow, steps run top to bottom in order; mark a step "parallel with previous" to have it run alongside the one before it instead of after. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
       <div class="card panel" id="workflowConfigPanel"></div>
     </div>
 
@@ -785,10 +785,10 @@ const DEFAULT_ROLES = {
 // Seed steps for the "Load starter workflow" button — used to create a
 // Default workflow config (category blank) plus these steps under it.
 const DEFAULT_WORKFLOW_STEPS = [
-  { label:'Planning Review', role:'planning_engineer', stage:0, fromStatus:'pending_review', toStatus:'pending_review' },
-  { label:'QA Review',        role:'qa_manager',        stage:0, fromStatus:'pending_review', toStatus:'pending_review' },
-  { label:'Project Manager Approval', role:'project_manager', stage:1, fromStatus:'pending_review', toStatus:'pending_approval' },
-  { label:'Management Approval',      role:'management',      stage:2, fromStatus:'pending_approval', toStatus:'approved' }
+  { label:'Planning Review', role:'planning_engineer', order:0, parallelWithPrevious:false, fromStatus:'pending_review', toStatus:'pending_review' },
+  { label:'QA Review',        role:'qa_manager',        order:1, parallelWithPrevious:true,  fromStatus:'pending_review', toStatus:'pending_review' },
+  { label:'Project Manager Approval', role:'project_manager', order:2, parallelWithPrevious:false, fromStatus:'pending_review', toStatus:'pending_approval' },
+  { label:'Management Approval',      role:'management',      order:3, parallelWithPrevious:false, fromStatus:'pending_approval', toStatus:'approved' }
 ];
 const DEFAULT_STATUS_LABELS = {
   pending_review:'Pending Review', pending_approval:'Pending Approval',
