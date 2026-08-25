@@ -904,27 +904,19 @@ function seedDefaultRoles(){
 }
 
 /* ============================================================
-   WORKFLOW CONFIGURATION (admin edits; live for everyone)
-   Steps sharing a stage number run in parallel (all must approve to
-   advance); different stage numbers run sequentially in ascending order.
-   Admin-typed stage numbers don't need to be contiguous — they're
-   normalized to 0,1,2... here, so gaps or arbitrary numbering are fine.
-   This only affects documents uploaded AFTER a change; documents already
-   in progress keep the step shape they were created with (see
-   applyStepDecision / renderDetail, which read from each document's own
-   frozen steps rather than this live config).
-============================================================ */
-/* ============================================================
    WORKFLOW CONFIGURATIONS (admin edits; live for everyone)
    Each Workflow Config has a name, an assigned Document Category (or
    blank for "Default — applies to any category without its own config"),
-   and its own list of Stage/Role/From-To Status mappings. Documents
-   resolve which config applies from their own category at upload time
-   (resolveWorkflowForCategory) and freeze a copy of its steps — later
-   edits here never retroactively affect documents already in progress.
+   and its own ordered list of Role/From-To Status mappings. Steps run top
+   to bottom in order, except any marked parallelWithPrevious, which run
+   alongside the step just before them. resolveWorkflowForCategory()
+   translates that ordered list into the internal stage-group numbers the
+   approval engine has always used, and documents freeze a copy of the
+   result at upload time — later edits here never retroactively affect
+   documents already in progress.
 ============================================================ */
 let workflowConfigsData = [];       // [{id, name, category, createdAt}]
-let workflowConfigStepsData = [];   // [{id, configId, role, stage, fromStatus, toStatus, label}]
+let workflowConfigStepsData = [];   // [{id, configId, role, order, parallelWithPrevious, fromStatus, toStatus, label}]
 let activeWorkflowConfigId = null;  // which config's detail view is open; null = list view
 
 function listenWorkflowConfigs(){
@@ -949,16 +941,27 @@ function resolveWorkflowForCategory(category){
   let config = workflowConfigsData.find(c => c.category === category);
   if(!config) config = workflowConfigsData.find(c => !c.category);
   if(!config) return null;
-  const raw = workflowConfigStepsData.filter(s => s.configId === config.id);
+  const raw = workflowConfigStepsData.filter(s => s.configId === config.id)
+    .sort((a,b) => (a.order || 0) - (b.order || 0));
   if(raw.length === 0) return null;
-  const distinctStages = [...new Set(raw.map(s => s.stage))].sort((a,b) => a - b);
-  const stageMap = new Map(distinctStages.map((s,i) => [s,i]));
+  // Turn the ordered list + "parallel with previous" flags into the same
+  // internal stage-group numbers the approval engine has always used — the
+  // first step always starts group 0; each later step either joins the
+  // current group (parallelWithPrevious) or starts the next one. This is
+  // the only place that translates the simplified admin-facing config into
+  // that shape, so nothing downstream (queue, decisions, publishing) needed
+  // to change at all.
+  let stageCounter = 0;
+  const withStage = raw.map((s, idx) => {
+    if(idx > 0 && !s.parallelWithPrevious) stageCounter++;
+    return { ...s, stage: stageCounter };
+  });
   return {
     configId: config.id,
     configName: config.name,
-    steps: raw.map(s => ({
+    steps: withStage.map(s => ({
       key: s.id, label: s.label || ROLE_LABELS[s.role] || s.role, role: s.role,
-      stage: stageMap.get(s.stage), fromStatus: s.fromStatus || '', toStatus: s.toStatus || ''
+      stage: s.stage, fromStatus: s.fromStatus || '', toStatus: s.toStatus || ''
     }))
   };
 }
@@ -1019,33 +1022,35 @@ function renderWorkflowConfigDetail(panel){
   if(!config){ activeWorkflowConfigId = null; renderWorkflowConfigList(panel); return; }
   const allStatusOptions = getAllStatusOptions();
   const stepsRaw = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
-  const sorted = [...stepsRaw].sort((a,b) => a.stage - b.stage);
-  const rows = sorted.map(s => `
+  const sorted = [...stepsRaw].sort((a,b) => (a.order || 0) - (b.order || 0));
+  const rows = sorted.map((s, idx) => {
+    const parallelBadge = s.parallelWithPrevious && idx > 0
+      ? '<span class="step-chip approved" style="margin-left:8px;">&Vert; Parallel with previous</span>' : '';
+    return `
     <tr>
-      <td><span class="drawing-code">Stage ${s.stage + 1}</span></td>
-      <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
+      <td style="white-space:nowrap;">
+        <b style="margin-right:6px; color:var(--text-muted);">${idx + 1}</b>
+        <button class="icon-btn-sm" onclick="moveWorkflowConfigStep('${s.id}',-1)" title="Move up" ${idx === 0 ? 'disabled' : ''}>&#9650;&#65039;</button>
+        <button class="icon-btn-sm" onclick="moveWorkflowConfigStep('${s.id}',1)" title="Move down" ${idx === sorted.length - 1 ? 'disabled' : ''}>&#9660;&#65039;</button>
+      </td>
+      <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}${parallelBadge}</td>
       <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
       <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
       <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
-  const stageNumbers = [...new Set(stepsRaw.map(s => s.stage))].sort((a,b) => a - b);
-  const maxStage = stageNumbers.length ? Math.max(...stageNumbers) : -1;
   const statusOptionsHtml = Object.entries(allStatusOptions).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('');
 
   panel.innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="backToWorkflowList()" style="margin-bottom:16px;">&larr; Back to Workflows</button>
     <h3 style="margin-bottom:3px;">${escapeHtml(config.name)}</h3>
     <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:18px;">${config.category ? `Applies to Document Category: <b>${escapeHtml(config.category)}</b>` : 'Default workflow — applies to any Document Category without its own workflow'}</div>
-    ${stepsRaw.length ? `<table><thead><tr><th>Stage</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    ${stepsRaw.length ? `<table><thead><tr><th style="width:100px;">Order</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : `<div class="master-empty">No steps yet — add at least one below.</div>`}
     <div class="workflow-add-block" style="margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
       <h4>Add Workflow Mapping</h4>
       <div class="workflow-add-row">
-        <select id="newStepStage">
-          ${stageNumbers.map(n => `<option value="${n}">Stage ${n + 1} (parallel with existing)</option>`).join('')}
-          <option value="${maxStage + 1}" selected>New Stage ${maxStage + 2}</option>
-        </select>
         <select id="newStepRole">
           <option value="">Role&hellip;</option>
           ${Object.entries(ROLE_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
@@ -1054,9 +1059,26 @@ function renderWorkflowConfigDetail(panel){
         <select id="newStepToStatus"><option value="">To Status&hellip;</option>${statusOptionsHtml}</select>
         <button class="btn btn-teal btn-sm" onclick="addWorkflowConfigStep()">+ Add Mapping</button>
       </div>
-      <div class="auth-hint" style="margin-top:10px;">From/To Status document what each step represents for reference and reporting. The actual approval order and publishing still follow Stage order within this workflow.</div>
+      <label style="display:flex; align-items:center; gap:7px; margin-top:12px; font-size:12.5px; color:var(--text-muted); cursor:${sorted.length ? 'pointer' : 'default'};">
+        <input type="checkbox" id="newStepParallel" ${sorted.length === 0 ? 'disabled' : ''}>
+        Runs together with the previous step (parallel — both must approve before moving on)
+      </label>
+      <div class="auth-hint" style="margin-top:10px;">New mappings are added to the end of the list. Use the &#9650;&#65039;/&#9660;&#65039; arrows to reorder — steps run top to bottom, except any marked "parallel with previous," which run alongside the one just above it.</div>
     </div>
   `;
+}
+
+function moveWorkflowConfigStep(stepId, direction){
+  const steps = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId)
+    .sort((a,b) => (a.order || 0) - (b.order || 0));
+  const idx = steps.findIndex(s => s.id === stepId);
+  const swapIdx = idx + direction;
+  if(idx === -1 || swapIdx < 0 || swapIdx >= steps.length) return;
+  const a = steps[idx], b = steps[swapIdx];
+  const batch = db.batch();
+  batch.update(db.collection('workflowConfigSteps').doc(a.id), { order: b.order ?? swapIdx });
+  batch.update(db.collection('workflowConfigSteps').doc(b.id), { order: a.order ?? idx });
+  batch.commit().catch(err => toast('Could not reorder: ' + err.message, 'err'));
 }
 
 function openWorkflowConfigDetail(configId){
@@ -1102,16 +1124,23 @@ function deleteWorkflowConfig(configId){
 
 function addWorkflowConfigStep(){
   const configId = activeWorkflowConfigId;
-  const stage = parseInt(document.getElementById('newStepStage').value, 10);
   const role = document.getElementById('newStepRole').value;
   const fromStatus = document.getElementById('newStepFromStatus').value;
   const toStatus = document.getElementById('newStepToStatus').value;
+  const parallelCheckbox = document.getElementById('newStepParallel');
+  const parallelWithPrevious = parallelCheckbox ? parallelCheckbox.checked : false;
   if(!role){ toast('Please choose a role.', 'err'); return; }
   if(!fromStatus || !toStatus){ toast('Please choose both From Status and To Status.', 'err'); return; }
-  const dup = workflowConfigStepsData.some(s => s.configId === configId && s.stage === stage && s.role === role);
-  if(dup){ toast('A mapping for this role already exists at this stage in this workflow.', 'err'); return; }
+  const existingSteps = workflowConfigStepsData.filter(s => s.configId === configId);
+  const dup = existingSteps.some(s => s.role === role && s.fromStatus === fromStatus && s.toStatus === toStatus);
+  if(dup){ toast('An identical mapping already exists in this workflow.', 'err'); return; }
+  const maxOrder = existingSteps.length ? Math.max(...existingSteps.map(s => s.order || 0)) : -1;
   const label = ROLE_LABELS[role] || role;
-  db.collection('workflowConfigSteps').add({ configId, label, role, stage, fromStatus, toStatus, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+  db.collection('workflowConfigSteps').add({
+    configId, label, role, fromStatus, toStatus,
+    order: maxOrder + 1, parallelWithPrevious: existingSteps.length ? parallelWithPrevious : false,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  })
     .then(() => toast('Mapping added.', 'ok'))
     .catch(err => toast('Could not add: ' + err.message, 'err'));
 }
@@ -1119,7 +1148,7 @@ function removeWorkflowConfigStep(stepId){
   const configSteps = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
   if(configSteps.length <= 1){ toast('At least one step is required in a workflow — add a replacement before removing the last one.', 'err'); return; }
   const step = configSteps.find(s => s.id === stepId);
-  const desc = step ? `${ROLE_LABELS[step.role] || step.role} — Stage ${step.stage + 1}` : 'this mapping';
+  const desc = step ? `${ROLE_LABELS[step.role] || step.role}` : 'this mapping';
   if(!confirm(`Are you sure you want to remove this workflow mapping?\n\n"${desc}"`)) return;
   db.collection('workflowConfigSteps').doc(stepId).delete()
     .then(() => toast('Mapping removed.', 'ok'))
@@ -1131,7 +1160,8 @@ function seedDefaultWorkflow(){
   batch.set(configRef, { name: 'Default Workflow', category: '', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   DEFAULT_WORKFLOW_STEPS.forEach(s => {
     batch.set(db.collection('workflowConfigSteps').doc(), {
-      configId: configRef.id, label: s.label, role: s.role, stage: s.stage, fromStatus: s.fromStatus, toStatus: s.toStatus,
+      configId: configRef.id, label: s.label, role: s.role, order: s.order, parallelWithPrevious: s.parallelWithPrevious,
+      fromStatus: s.fromStatus, toStatus: s.toStatus,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   });
