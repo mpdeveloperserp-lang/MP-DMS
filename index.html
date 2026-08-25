@@ -546,8 +546,8 @@
 
     <!-- ---------------- WORKFLOW CONFIGURATION VIEW (admin only) ---------------- -->
     <div class="view" id="workflowConfigView">
-      <div class="view-head"><h2>Workflow Configuration</h2><button class="btn btn-teal" onclick="openCreateWorkflowModal()">+ Create Workflow</button></div>
-      <div class="view-sub">Each Document Category can have its own approval workflow &mdash; or share a Default one. No manual ordering needed: add mappings with a Role, a From Status, and a To Status, and the sequence is worked out automatically by matching each step's To Status to the next step's From Status. Steps sharing a From Status run in parallel. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
+      <div class="view-head"><h2>Workflow Configuration</h2></div>
+      <div class="view-sub">One workflow per Document Category, listed automatically &mdash; click a category to configure it directly. No manual ordering needed: add mappings with a Role, a From Status, and a To Status, and the sequence is worked out by matching each step's To Status to the next step's From Status. Steps sharing a From Status run in parallel. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
       <div class="card panel" id="workflowConfigPanel"></div>
     </div>
 
@@ -655,23 +655,6 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createStatusModalOverlay')">Cancel</button>
       <button class="btn btn-teal" onclick="submitCreateStatus()">Create Status</button>
-    </div>
-  </div>
-</div>
-
-<!-- ---------------- CREATE WORKFLOW MODAL (admin only) ---------------- -->
-<div class="modal-overlay" id="createWorkflowModalOverlay">
-  <div class="modal">
-    <div class="modal-head"><h3>Create Workflow</h3><button class="modal-close" onclick="closeModal('createWorkflowModalOverlay')">&times;</button></div>
-    <div class="modal-body">
-      <div class="field"><label>Workflow name</label><input type="text" id="createWorkflowName" placeholder="e.g. Structural Drawing Approval" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitCreateWorkflow();}"></div>
-      <div class="field"><label>Document Category</label>
-        <select id="createWorkflowCategory"><option value="">Default (applies to any category without its own workflow)</option></select>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('createWorkflowModalOverlay')">Cancel</button>
-      <button class="btn btn-teal" onclick="submitCreateWorkflow()">Create Workflow</button>
     </div>
   </div>
 </div>
