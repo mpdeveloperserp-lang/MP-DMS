@@ -517,7 +517,7 @@ function submitResubmission(){
     const docData = docSnap.data();
     const resolved = resolveWorkflowForCategory(docData.category);
     if(!resolved){
-      toast(`No workflow is configured for "${docData.category}" (and no Default workflow exists). Ask an Admin to set one up under Workflow Configuration.`, 'err');
+      toast(getWorkflowResolutionIssue(docData.category), 'err');
       btn.disabled = false; btn.textContent = 'Submit Revised Version';
       return;
     }
@@ -907,16 +907,16 @@ function seedDefaultRoles(){
    WORKFLOW CONFIGURATIONS (admin edits; live for everyone)
    Each Workflow Config has a name, an assigned Document Category (or
    blank for "Default — applies to any category without its own config"),
-   and its own ordered list of Role/From-To Status mappings. Steps run top
-   to bottom in order, except any marked parallelWithPrevious, which run
-   alongside the step just before them. resolveWorkflowForCategory()
-   translates that ordered list into the internal stage-group numbers the
-   approval engine has always used, and documents freeze a copy of the
-   result at upload time — later edits here never retroactively affect
-   documents already in progress.
+   and its own set of Role/From-To Status mappings — no manual ordering at
+   all. computeStatusChain() walks the sequence automatically by matching
+   each step's toStatus to the next step's fromStatus (steps sharing a
+   fromStatus run in parallel); resolveWorkflowForCategory() turns that
+   into the internal stage-group numbers the approval engine has always
+   used, and documents freeze a copy of the result at upload time — later
+   edits here never retroactively affect documents already in progress.
 ============================================================ */
 let workflowConfigsData = [];       // [{id, name, category, createdAt}]
-let workflowConfigStepsData = [];   // [{id, configId, role, order, parallelWithPrevious, fromStatus, toStatus, label}]
+let workflowConfigStepsData = [];   // [{id, configId, role, fromStatus, toStatus, label}]
 let activeWorkflowConfigId = null;  // which config's detail view is open; null = list view
 
 function listenWorkflowConfigs(){
@@ -937,33 +937,84 @@ function listenWorkflowConfigs(){
 // match first, falling back to the Default config (category === '' / not
 // set) if no category-specific one exists. Returns null if genuinely
 // nothing applies — callers must handle that (blocks upload).
+// Walks a set of {fromStatus, toStatus} mappings purely by matching each
+// step's toStatus to the next step's fromStatus — no manual ordering at
+// all. Steps sharing the same fromStatus run in parallel (all must
+// approve before the chain advances); the walk starts at whichever status
+// isn't produced by any step here (nothing transitions INTO it) and ends
+// when a status is reached that no step starts from. Returns an error
+// instead of a result if the chain is ambiguous, cyclic, or disconnected,
+// so problems surface as a clear message rather than silently misbehaving.
+function computeStatusChain(steps){
+  if(steps.length === 0) return { ok: true, staged: [] };
+  const fromSet = new Set(steps.map(s => s.fromStatus));
+  const toSet = new Set(steps.map(s => s.toStatus));
+  const roots = [...fromSet].filter(fs => !toSet.has(fs));
+
+  if(roots.length === 0){
+    return { ok: false, error: 'Could not find a starting point — every status here is also produced by another step (a loop).' };
+  }
+  if(roots.length > 1){
+    const labels = getAllStatusOptions();
+    return { ok: false, error: `Found more than one possible starting point (${roots.map(r => labels[r] || r).join(', ')}) — every step should chain from a single starting status.` };
+  }
+
+  const staged = [];
+  const seen = new Set();
+  let current = roots[0];
+  let stage = 0;
+  while(true){
+    if(seen.has(current)){
+      return { ok: false, error: 'This workflow loops back on itself (a status eventually leads back to one already used) — check the From/To Status chain.' };
+    }
+    seen.add(current);
+    const here = steps.filter(s => s.fromStatus === current);
+    if(here.length === 0) break;
+    const nextSet = new Set(here.map(s => s.toStatus));
+    if(nextSet.size > 1){
+      const labels = getAllStatusOptions();
+      return { ok: false, error: `Steps starting from "${labels[current] || current}" lead to different next statuses (${[...nextSet].map(s => labels[s] || s).join(', ')}) — parallel steps at the same point must all lead to the same next status.` };
+    }
+    here.forEach(s => staged.push({ ...s, stage }));
+    current = [...nextSet][0];
+    stage++;
+    if(stage > 50) return { ok: false, error: 'This chain is unexpectedly long — something is likely misconfigured.' };
+  }
+  if(staged.length < steps.length){
+    return { ok: false, error: "Some steps aren't connected to the main chain — check that each step's From Status matches another step's To Status (or is the starting status)." };
+  }
+  return { ok: true, staged };
+}
+
 function resolveWorkflowForCategory(category){
   let config = workflowConfigsData.find(c => c.category === category);
   if(!config) config = workflowConfigsData.find(c => !c.category);
   if(!config) return null;
-  const raw = workflowConfigStepsData.filter(s => s.configId === config.id)
-    .sort((a,b) => (a.order || 0) - (b.order || 0));
+  const raw = workflowConfigStepsData.filter(s => s.configId === config.id);
   if(raw.length === 0) return null;
-  // Turn the ordered list + "parallel with previous" flags into the same
-  // internal stage-group numbers the approval engine has always used — the
-  // first step always starts group 0; each later step either joins the
-  // current group (parallelWithPrevious) or starts the next one. This is
-  // the only place that translates the simplified admin-facing config into
-  // that shape, so nothing downstream (queue, decisions, publishing) needed
-  // to change at all.
-  let stageCounter = 0;
-  const withStage = raw.map((s, idx) => {
-    if(idx > 0 && !s.parallelWithPrevious) stageCounter++;
-    return { ...s, stage: stageCounter };
-  });
+  const result = computeStatusChain(raw);
+  if(!result.ok) return null; // caller treats this the same as "no workflow" — blocks upload with a message
   return {
     configId: config.id,
     configName: config.name,
-    steps: withStage.map(s => ({
+    steps: result.staged.map(s => ({
       key: s.id, label: s.label || ROLE_LABELS[s.role] || s.role, role: s.role,
       stage: s.stage, fromStatus: s.fromStatus || '', toStatus: s.toStatus || ''
     }))
   };
+}
+
+// Same lookup as resolveWorkflowForCategory, but surfaces WHY it failed
+// (no config at all vs. a config exists but its chain is broken) — used to
+// give a specific, actionable message instead of a generic "not configured".
+function getWorkflowResolutionIssue(category){
+  let config = workflowConfigsData.find(c => c.category === category);
+  if(!config) config = workflowConfigsData.find(c => !c.category);
+  if(!config) return 'No workflow is configured for this category (and no Default workflow exists).';
+  const raw = workflowConfigStepsData.filter(s => s.configId === config.id);
+  if(raw.length === 0) return `"${config.name}" has no steps yet.`;
+  const result = computeStatusChain(raw);
+  return result.ok ? null : `"${config.name}" has a configuration problem: ${result.error}`;
 }
 
 function updateUploadWorkflowHint(){
@@ -972,9 +1023,11 @@ function updateUploadWorkflowHint(){
   const category = document.getElementById('fCategory') ? document.getElementById('fCategory').value : '';
   if(!category){ el.innerHTML = ''; return; }
   const resolved = resolveWorkflowForCategory(category);
-  el.innerHTML = resolved
-    ? `Workflow: <b>${escapeHtml(resolved.configName)}</b> (${resolved.steps.length} step${resolved.steps.length === 1 ? '' : 's'})`
-    : `<span style="color:var(--red);">No workflow configured for this category yet — ask an Admin.</span>`;
+  if(resolved){
+    el.innerHTML = `Workflow: <b>${escapeHtml(resolved.configName)}</b> (${resolved.steps.length} step${resolved.steps.length === 1 ? '' : 's'})`;
+  } else {
+    el.innerHTML = `<span style="color:var(--red);">${escapeHtml(getWorkflowResolutionIssue(category))}</span>`;
+  }
 }
 
 function populateWorkflowCategorySelects(){
@@ -998,7 +1051,7 @@ function renderWorkflowConfigList(panel){
   if(workflowConfigsData.length === 0){
     panel.innerHTML = `<div class="empty-state"><div class="ic">&#8942;</div><b>No workflows configured yet</b>
       <div style="margin:8px 0 16px;">Uploads are blocked until at least one workflow exists — a Default one covers every Document Category until you add more specific ones.</div>
-      <button class="btn btn-teal btn-sm" onclick="seedDefaultWorkflow()">Load starter workflow (Default, 4 steps)</button>
+      <button class="btn btn-teal btn-sm" onclick="seedDefaultWorkflow()">Load starter workflow (Default, 3 steps)</button>
     </div>`;
     return;
   }
@@ -1022,23 +1075,36 @@ function renderWorkflowConfigDetail(panel){
   if(!config){ activeWorkflowConfigId = null; renderWorkflowConfigList(panel); return; }
   const allStatusOptions = getAllStatusOptions();
   const stepsRaw = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId);
-  const sorted = [...stepsRaw].sort((a,b) => (a.order || 0) - (b.order || 0));
-  const rows = sorted.map((s, idx) => {
-    const parallelBadge = s.parallelWithPrevious && idx > 0
-      ? '<span class="step-chip approved" style="margin-left:8px;">&Vert; Parallel with previous</span>' : '';
-    return `
-    <tr>
-      <td style="white-space:nowrap;">
-        <b style="margin-right:6px; color:var(--text-muted);">${idx + 1}</b>
-        <button class="icon-btn-sm" onclick="moveWorkflowConfigStep('${s.id}',-1)" title="Move up" ${idx === 0 ? 'disabled' : ''}>&#9650;&#65039;</button>
-        <button class="icon-btn-sm" onclick="moveWorkflowConfigStep('${s.id}',1)" title="Move down" ${idx === sorted.length - 1 ? 'disabled' : ''}>&#9660;&#65039;</button>
-      </td>
-      <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}${parallelBadge}</td>
-      <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
-      <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
-      <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
-    </tr>`;
-  }).join('');
+  const chainResult = computeStatusChain(stepsRaw);
+
+  let tableOrWarning;
+  if(stepsRaw.length === 0){
+    tableOrWarning = `<div class="master-empty">No steps yet — add at least one below.</div>`;
+  } else if(!chainResult.ok){
+    tableOrWarning = `
+      <div class="auth-error" style="display:block; margin-bottom:16px;">${escapeHtml(chainResult.error)} Uploads using this workflow are blocked until this is fixed.</div>
+      <table><thead><tr><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>
+        ${stepsRaw.map(s => `<tr>
+          <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
+          <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
+          <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
+          <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  } else {
+    const rows = chainResult.staged.map(s => {
+      const parallelCount = chainResult.staged.filter(x => x.stage === s.stage).length;
+      const parallelBadge = parallelCount > 1 ? '<span class="step-chip approved" style="margin-left:8px;">&Vert; Parallel</span>' : '';
+      return `<tr>
+        <td><span class="drawing-code">${s.stage + 1}</span></td>
+        <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}${parallelBadge}</td>
+        <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
+        <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
+        <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
+      </tr>`;
+    }).join('');
+    tableOrWarning = `<table><thead><tr><th style="width:50px;">#</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
 
   const statusOptionsHtml = Object.entries(allStatusOptions).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('');
 
@@ -1046,8 +1112,7 @@ function renderWorkflowConfigDetail(panel){
     <button class="btn btn-ghost btn-sm" onclick="backToWorkflowList()" style="margin-bottom:16px;">&larr; Back to Workflows</button>
     <h3 style="margin-bottom:3px;">${escapeHtml(config.name)}</h3>
     <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:18px;">${config.category ? `Applies to Document Category: <b>${escapeHtml(config.category)}</b>` : 'Default workflow — applies to any Document Category without its own workflow'}</div>
-    ${stepsRaw.length ? `<table><thead><tr><th style="width:100px;">Order</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-      : `<div class="master-empty">No steps yet — add at least one below.</div>`}
+    ${tableOrWarning}
     <div class="workflow-add-block" style="margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
       <h4>Add Workflow Mapping</h4>
       <div class="workflow-add-row">
@@ -1059,26 +1124,9 @@ function renderWorkflowConfigDetail(panel){
         <select id="newStepToStatus"><option value="">To Status&hellip;</option>${statusOptionsHtml}</select>
         <button class="btn btn-teal btn-sm" onclick="addWorkflowConfigStep()">+ Add Mapping</button>
       </div>
-      <label style="display:flex; align-items:center; gap:7px; margin-top:12px; font-size:12.5px; color:var(--text-muted); cursor:${sorted.length ? 'pointer' : 'default'};">
-        <input type="checkbox" id="newStepParallel" ${sorted.length === 0 ? 'disabled' : ''}>
-        Runs together with the previous step (parallel — both must approve before moving on)
-      </label>
-      <div class="auth-hint" style="margin-top:10px;">New mappings are added to the end of the list. Use the &#9650;&#65039;/&#9660;&#65039; arrows to reorder — steps run top to bottom, except any marked "parallel with previous," which run alongside the one just above it.</div>
+      <div class="auth-hint" style="margin-top:10px;">No manual ordering needed — the sequence is worked out automatically by matching each step's To Status to the next step's From Status. Steps that share a From Status run in parallel (all must approve before moving on). The "#" column above shows the order this produced, purely for your reference.</div>
     </div>
   `;
-}
-
-function moveWorkflowConfigStep(stepId, direction){
-  const steps = workflowConfigStepsData.filter(s => s.configId === activeWorkflowConfigId)
-    .sort((a,b) => (a.order || 0) - (b.order || 0));
-  const idx = steps.findIndex(s => s.id === stepId);
-  const swapIdx = idx + direction;
-  if(idx === -1 || swapIdx < 0 || swapIdx >= steps.length) return;
-  const a = steps[idx], b = steps[swapIdx];
-  const batch = db.batch();
-  batch.update(db.collection('workflowConfigSteps').doc(a.id), { order: b.order ?? swapIdx });
-  batch.update(db.collection('workflowConfigSteps').doc(b.id), { order: a.order ?? idx });
-  batch.commit().catch(err => toast('Could not reorder: ' + err.message, 'err'));
 }
 
 function openWorkflowConfigDetail(configId){
@@ -1127,18 +1175,23 @@ function addWorkflowConfigStep(){
   const role = document.getElementById('newStepRole').value;
   const fromStatus = document.getElementById('newStepFromStatus').value;
   const toStatus = document.getElementById('newStepToStatus').value;
-  const parallelCheckbox = document.getElementById('newStepParallel');
-  const parallelWithPrevious = parallelCheckbox ? parallelCheckbox.checked : false;
   if(!role){ toast('Please choose a role.', 'err'); return; }
   if(!fromStatus || !toStatus){ toast('Please choose both From Status and To Status.', 'err'); return; }
+  if(fromStatus === toStatus){ toast('From Status and To Status can\'t be the same.', 'err'); return; }
   const existingSteps = workflowConfigStepsData.filter(s => s.configId === configId);
   const dup = existingSteps.some(s => s.role === role && s.fromStatus === fromStatus && s.toStatus === toStatus);
   if(dup){ toast('An identical mapping already exists in this workflow.', 'err'); return; }
-  const maxOrder = existingSteps.length ? Math.max(...existingSteps.map(s => s.order || 0)) : -1;
+  // Steps sharing a From Status run in parallel and must all lead to the
+  // SAME To Status — otherwise the chain can't be walked unambiguously.
+  const conflicting = existingSteps.find(s => s.fromStatus === fromStatus && s.toStatus !== toStatus);
+  if(conflicting){
+    const labels = getAllStatusOptions();
+    toast(`Another step already goes from "${labels[fromStatus] || fromStatus}" to "${labels[conflicting.toStatus] || conflicting.toStatus}" — parallel steps at the same point must lead to the same next status.`, 'err');
+    return;
+  }
   const label = ROLE_LABELS[role] || role;
   db.collection('workflowConfigSteps').add({
     configId, label, role, fromStatus, toStatus,
-    order: maxOrder + 1, parallelWithPrevious: existingSteps.length ? parallelWithPrevious : false,
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   })
     .then(() => toast('Mapping added.', 'ok'))
@@ -1160,7 +1213,7 @@ function seedDefaultWorkflow(){
   batch.set(configRef, { name: 'Default Workflow', category: '', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   DEFAULT_WORKFLOW_STEPS.forEach(s => {
     batch.set(db.collection('workflowConfigSteps').doc(), {
-      configId: configRef.id, label: s.label, role: s.role, order: s.order, parallelWithPrevious: s.parallelWithPrevious,
+      configId: configRef.id, label: s.label, role: s.role,
       fromStatus: s.fromStatus, toStatus: s.toStatus,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
