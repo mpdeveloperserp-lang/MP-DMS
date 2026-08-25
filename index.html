@@ -547,7 +547,7 @@
     <!-- ---------------- WORKFLOW CONFIGURATION VIEW (admin only) ---------------- -->
     <div class="view" id="workflowConfigView">
       <div class="view-head"><h2>Workflow Configuration</h2><button class="btn btn-teal" onclick="openCreateWorkflowModal()">+ Create Workflow</button></div>
-      <div class="view-sub">Each Document Category can have its own approval workflow &mdash; or share a Default one. Within a workflow, steps run top to bottom in order; mark a step "parallel with previous" to have it run alongside the one before it instead of after. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
+      <div class="view-sub">Each Document Category can have its own approval workflow &mdash; or share a Default one. No manual ordering needed: add mappings with a Role, a From Status, and a To Status, and the sequence is worked out automatically by matching each step's To Status to the next step's From Status. Steps sharing a From Status run in parallel. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
       <div class="card panel" id="workflowConfigPanel"></div>
     </div>
 
@@ -785,10 +785,9 @@ const DEFAULT_ROLES = {
 // Seed steps for the "Load starter workflow" button — used to create a
 // Default workflow config (category blank) plus these steps under it.
 const DEFAULT_WORKFLOW_STEPS = [
-  { label:'Planning Review', role:'planning_engineer', order:0, parallelWithPrevious:false, fromStatus:'pending_review', toStatus:'pending_review' },
-  { label:'QA Review',        role:'qa_manager',        order:1, parallelWithPrevious:true,  fromStatus:'pending_review', toStatus:'pending_review' },
-  { label:'Project Manager Approval', role:'project_manager', order:2, parallelWithPrevious:false, fromStatus:'pending_review', toStatus:'pending_approval' },
-  { label:'Management Approval',      role:'management',      order:3, parallelWithPrevious:false, fromStatus:'pending_approval', toStatus:'approved' }
+  { label:'Planning Review',     role:'planning_engineer', fromStatus:'pending_review',   toStatus:'pending_approval' },
+  { label:'QA Review',           role:'qa_manager',         fromStatus:'pending_review',   toStatus:'pending_approval' },
+  { label:'Management Approval', role:'management',         fromStatus:'pending_approval', toStatus:'approved' }
 ];
 const DEFAULT_STATUS_LABELS = {
   pending_review:'Pending Review', pending_approval:'Pending Approval',
@@ -1030,7 +1029,7 @@ function handleUpload(ev){
   };
   const resolved = resolveWorkflowForCategory(meta.category);
   if(!resolved){
-    toast(`No workflow is configured for "${meta.category}" (and no Default workflow exists). Ask an Admin to set one up under Workflow Configuration.`, 'err');
+    toast(getWorkflowResolutionIssue(meta.category), 'err');
     return false;
   }
   const btn = document.getElementById('uploadBtn');
