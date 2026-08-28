@@ -631,7 +631,6 @@ function listenMasters(){
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
       refreshMasterDataPanels();
       if(mt.key === 'categoryMasters' && currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
-      if(mt.key === 'projectMasters' && currentUser && currentUser.role === 'admin') renderStaffingLists();
     }, err => console.error(mt.key + ' listener:', err));
     // Only track for teardown when running post-login (masters also load
     // pre-login for the old registration screen's use case — harmless to
@@ -824,7 +823,6 @@ function listenRoleMasters(){
     if(currentUser && currentUser.role === 'admin'){
       renderRolesMasterView();
       renderWorkflowConfigView(); // its role picker reflects ROLE_LABELS too
-      renderPageAccessView(); // its matrix rows are roles too
     }
   }, err => console.error('role masters listener:', err));
   activeSessionUnsubs.push(unsub);
@@ -1382,12 +1380,12 @@ function listenUsers(){
   const unsub = db.collection('users').orderBy('name').onSnapshot(snap => {
     usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     populateSnagUserSelects();
+    populateUaUserSelect(); // always populate — the view itself is admin-gated
     if(currentUser && currentUser.role === 'admin'){
       renderUsersView();
       refreshMasterDataPanels(); // department "in use" status depends on this data
       renderRolesMasterView(); // role "in use" status depends on this data
-      populateUserAccessUserSelect();
-      renderUserPageAccessRow();
+      renderUserAccessPanel(); // re-render if a user is already selected
     }
   }, err => console.error('users listener:', err));
   activeSessionUnsubs.push(unsub);
@@ -2559,221 +2557,8 @@ function clearSnagReportFilters(){
 }
 
 /* ============================================================
-   PAGE ACCESS
-   Two layers for the 13 pages in PAGE_ACCESS_ITEMS (index.html):
-   role-level (pageAccessData, sets the default for everyone with that
-   role) and user-level (userPageAccessData, an explicit override for one
-   specific person that wins over their role's setting for whichever
-   pages it touches — anything not touched still follows the role).
-   Admin always has full access and is never a row/option in either
-   layer. Both layers default to ALLOWED when nothing is configured, so
-   rolling this out never silently locks anyone out of a page they could
-   already see.
-============================================================ */
-let pageAccessData = {}; // { [roleId]: { pages: { [pageKey]: bool } } }
-let userPageAccessData = {}; // { [uid]: { pages: { [pageKey]: bool } } }
-
-function listenPageAccess(){
-  const unsub = db.collection('rolePageAccess').onSnapshot(snap => {
-    const data = {};
-    snap.docs.forEach(d => { data[d.id] = d.data(); });
-    pageAccessData = data;
-    applyPageAccessToNav();
-    if(currentUser && currentUser.role === 'admin') renderPageAccessView();
-  }, err => console.error('rolePageAccess listener:', err));
-  activeSessionUnsubs.push(unsub);
-}
-function listenUserPageAccess(){
-  const unsub = db.collection('userPageAccess').onSnapshot(snap => {
-    const data = {};
-    snap.docs.forEach(d => { data[d.id] = d.data(); });
-    userPageAccessData = data;
-    applyPageAccessToNav();
-    if(currentUser && currentUser.role === 'admin') renderUserPageAccessRow();
-  }, err => console.error('userPageAccess listener:', err));
-  activeSessionUnsubs.push(unsub);
-}
-
-function canAccessPage(pageKey){
-  if(!currentUser) return false;
-  if(currentUser.role === 'admin') return true;
-  if(!PAGE_ACCESS_ITEMS.some(i => i.key === pageKey)) return true; // not a restrictable page (e.g. an admin-only page) — separately gated already
-  // A per-user override, once set for this specific page, wins outright.
-  const userAccess = userPageAccessData[currentUser.uid];
-  if(userAccess && userAccess.pages && (pageKey in userAccess.pages)){
-    return userAccess.pages[pageKey] !== false;
-  }
-  // Otherwise, a page is allowed if ANY of the user's effective roles
-  // (primary or additional) allows it — holding multiple roles is meant
-  // to add capabilities, not narrow them.
-  const myRoles = getUserRoles(currentUser);
-  if(myRoles.length === 0) return true;
-  return myRoles.some(roleId => {
-    const roleAccess = pageAccessData[roleId];
-    if(!roleAccess || !roleAccess.pages) return true;
-    if(!(pageKey in roleAccess.pages)) return true;
-    return roleAccess.pages[pageKey] !== false;
-  });
-}
-
-function applyPageAccessToNav(){
-  if(!currentUser) return;
-  const activeEl = document.querySelector('.view.active');
-  const activeViewId = activeEl ? activeEl.id : null;
-  let activeViewNowHidden = false;
-  PAGE_ACCESS_ITEMS.forEach(item => {
-    const btn = document.querySelector(`.nav-item[data-view="${item.key}"]`);
-    if(!btn) return;
-    const allowed = canAccessPage(item.key);
-    btn.classList.toggle('hidden', !allowed);
-    if(item.key === activeViewId && !allowed) activeViewNowHidden = true;
-  });
-  if(activeViewNowHidden){
-    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
-    switchView(fallback ? fallback.key : 'uploadView');
-  }
-}
-
-function renderPageAccessView(){
-  const panel = document.getElementById('pageAccessPanel');
-  if(!panel) return;
-  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
-  if(roleIds.length === 0){
-    panel.innerHTML = `<div class="master-empty">No non-Admin roles exist yet — add one under Manage Roles first.</div>`;
-    return;
-  }
-  const headerCells = roleIds.map(id => `<th style="text-align:center; white-space:nowrap;">${escapeHtml(ROLE_LABELS[id])}</th>`).join('');
-  const rows = PAGE_ACCESS_ITEMS.map(item => {
-    const cells = roleIds.map(roleId => {
-      const allowed = (pageAccessData[roleId] && pageAccessData[roleId].pages && (item.key in pageAccessData[roleId].pages))
-        ? pageAccessData[roleId].pages[item.key] !== false
-        : true;
-      return `<td style="text-align:center;"><input type="checkbox" id="roleAccessCb_${roleId}_${item.key}" ${allowed ? 'checked' : ''}></td>`;
-    }).join('');
-    return `<tr><td>${escapeHtml(item.label)}</td>${cells}</tr>`;
-  }).join('');
-  panel.innerHTML = `
-    <table><thead><tr><th>Page</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>
-    <div style="margin-top:16px;"><button class="btn btn-teal" id="roleAccessSaveBtn" onclick="saveRolePageAccess()">Save</button></div>
-  `;
-}
-
-function saveRolePageAccess(){
-  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
-  const btn = document.getElementById('roleAccessSaveBtn');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  const batch = db.batch();
-  roleIds.forEach(roleId => {
-    const pages = {};
-    PAGE_ACCESS_ITEMS.forEach(item => {
-      const cb = document.getElementById(`roleAccessCb_${roleId}_${item.key}`);
-      if(cb) pages[item.key] = cb.checked;
-    });
-    batch.set(db.collection('rolePageAccess').doc(roleId), { pages });
-  });
-  batch.commit()
-    .then(() => toast('Saved.', 'ok'))
-    .catch(err => toast('Could not save: ' + err.message, 'err'))
-    .finally(() => { btn.disabled = false; btn.textContent = 'Save'; });
-}
-
-// --- Per-user overrides ---
-function populateUserAccessUserSelect(){
-  const sel = document.getElementById('userAccessUserSelect');
-  if(!sel) return;
-  const prevValue = sel.value;
-  const nonAdminUsers = usersData.filter(u => u.role !== 'admin');
-  sel.innerHTML = '<option value="">Select a user&hellip;</option>' +
-    nonAdminUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)} &mdash; ${escapeHtml(getUserRoles(u).map(r => ROLE_LABELS[r] || r).join(', '))}</option>`).join('');
-  if(nonAdminUsers.some(u => u.id === prevValue)) sel.value = prevValue;
-}
-
-function renderUserPageAccessRow(){
-  const wrap = document.getElementById('userAccessRowWrap');
-  if(!wrap) return;
-  const uid = document.getElementById('userAccessUserSelect').value;
-  if(!uid){ wrap.innerHTML = ''; return; }
-  const user = usersData.find(u => u.id === uid);
-  if(!user){ wrap.innerHTML = ''; return; }
-  const userOverrides = (userPageAccessData[uid] && userPageAccessData[uid].pages) || {};
-  const myRoles = getUserRoles(user);
-  const hasAnyOverride = Object.keys(userOverrides).length > 0;
-
-  // Role default here is the UNION across all of this user's roles — same
-  // "any role grants it" logic as canAccessPage.
-  function roleDefaultFor(pageKey){
-    if(myRoles.length === 0) return true;
-    return myRoles.some(roleId => {
-      const roleAccess = pageAccessData[roleId];
-      if(!roleAccess || !roleAccess.pages) return true;
-      if(!(pageKey in roleAccess.pages)) return true;
-      return roleAccess.pages[pageKey] !== false;
-    });
-  }
-
-  const rows = PAGE_ACCESS_ITEMS.map(item => {
-    const hasOverride = item.key in userOverrides;
-    const roleDefault = roleDefaultFor(item.key);
-    const effective = hasOverride ? userOverrides[item.key] !== false : roleDefault;
-    return `<tr>
-      <td>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</td>
-      <td style="text-align:center;"><input type="checkbox" id="userAccessCb_${item.key}" data-role-default="${roleDefault}" ${effective ? 'checked' : ''}></td>
-    </tr>`;
-  }).join('');
-
-  const roleNames = myRoles.map(r => escapeHtml(ROLE_LABELS[r] || r)).join(', ') || '—';
-  wrap.innerHTML = `
-    <div style="margin:14px 0 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-      <div style="font-size:12.5px; color:var(--text-muted);">Role defaults (combined): <b>${roleNames}</b>. A page is allowed by default if any of their roles allows it. The boxes below reflect that &mdash; check/uncheck to set an exception just for ${escapeHtml(user.name)}, then click Save.</div>
-      <button class="btn btn-ghost btn-sm" onclick="resetUserPageAccess('${uid}')" ${hasAnyOverride ? '' : 'disabled'}>Reset to role defaults</button>
-    </div>
-    <table><thead><tr><th>Page</th><th style="width:90px;">Access</th></tr></thead><tbody>${rows}</tbody></table>
-    <div style="margin-top:16px;"><button class="btn btn-teal" id="userAccessSaveBtn" onclick="saveUserPageAccess('${uid}')">Save</button></div>
-  `;
-}
-
-function saveUserPageAccess(uid){
-  const btn = document.getElementById('userAccessSaveBtn');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  // Only pages where the checkbox now DIFFERS from the role's own default
-  // become an explicit override — anything left matching the role isn't
-  // stored at all, so "Custom" stays meaningful and a page nobody touched
-  // keeps tracking the role automatically if that role changes later.
-  const diff = {};
-  PAGE_ACCESS_ITEMS.forEach(item => {
-    const cb = document.getElementById(`userAccessCb_${item.key}`);
-    if(!cb) return;
-    const roleDefault = cb.dataset.roleDefault === 'true';
-    if(cb.checked !== roleDefault) diff[item.key] = cb.checked;
-  });
-  const hasDiff = Object.keys(diff).length > 0;
-  const p = hasDiff
-    ? db.collection('userPageAccess').doc(uid).set({ pages: diff })
-    : db.collection('userPageAccess').doc(uid).delete();
-  p.then(() => toast('Saved.', 'ok'))
-   .catch(err => toast('Could not save: ' + err.message, 'err'))
-   .finally(() => { btn.disabled = false; btn.textContent = 'Save'; });
-}
-function resetUserPageAccess(uid){
-  if(!confirm("Remove all custom page-access overrides for this user? They'll go back to following their role's defaults.")) return;
-  db.collection('userPageAccess').doc(uid).delete()
-    .then(() => toast('Reset to role defaults.', 'ok'))
-    .catch(err => toast('Could not reset: ' + err.message, 'err'));
-}
-
-/* ============================================================
    GOOD QUALITY WORK
-   A positive-callout log — Project/Location/Remarks plus up to 3 photos,
-   with an editable list and a filterable report. No approval lifecycle
-   (matches the reference, which only shows Edit/Delete, not a review
-   chain) and not role-gated, consistent with the rest of this family.
-   Editing text fields is supported; replacing photos isn't (delete and
-   re-log instead) to avoid the complexity of tracking which of 3 slots
-   changed vs stayed the same.
 ============================================================ */
-let goodWorkData = [];
-let activeGoodWorkId = null;
-
 function listenGoodWork(){
   const unsub = db.collection('goodQualityWork').orderBy('createdAt', 'desc').onSnapshot(snap => {
     goodWorkData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -2796,20 +2581,16 @@ function handleGoodWorkSubmit(ev){
   const files = ['goodWorkFile1', 'goodWorkFile2', 'goodWorkFile3']
     .map(id => document.getElementById(id).files[0])
     .filter(Boolean);
-
   const finish = (images) => {
     const now = firebase.firestore.FieldValue.serverTimestamp();
     db.collection('goodQualityWork').add({
       ...meta, images,
       createdBy: currentUser.uid, createdByName: currentUser.name,
       createdAt: now, updatedAt: now
-    }).then(() => {
-      toast('Saved.', 'ok');
-      document.getElementById('goodWorkForm').reset();
-    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+    }).then(() => { toast('Saved.', 'ok'); document.getElementById('goodWorkForm').reset(); })
+      .catch(err => toast('Could not save: ' + err.message, 'err'))
       .finally(() => { btn.disabled = false; btn.textContent = 'Save'; document.getElementById('goodWorkProgressWrap').style.display = 'none'; });
   };
-
   function uploadNext(idx, images){
     if(idx >= files.length) return finish(images);
     const f = files[idx];
@@ -2825,18 +2606,13 @@ function handleGoodWorkSubmit(ev){
   if(files.length) uploadNext(0, []); else finish([]);
   return false;
 }
-
 function goodWorkPhotoThumbs(images){
   return (images || []).map(url => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:5px; margin-right:4px;"></a>`).join('') || '—';
 }
-
 function renderGoodWorkTable(){
   const body = document.getElementById('goodWorkTableBody');
   if(!body) return;
-  if(goodWorkData.length === 0){
-    body.innerHTML = `<tr><td colspan="5"><div class="empty-state"><b>Nothing logged yet</b></div></td></tr>`;
-    return;
-  }
+  if(goodWorkData.length === 0){ body.innerHTML = `<tr><td colspan="5"><div class="empty-state"><b>Nothing logged yet</b></div></td></tr>`; return; }
   body.innerHTML = goodWorkData.map(g => `
     <tr onclick="openEditGoodWorkModal('${g.id}')">
       <td>${escapeHtml(g.project || '—')}</td>
@@ -2846,7 +2622,6 @@ function renderGoodWorkTable(){
       <td style="text-align:right;"><button class="icon-btn-sm" onclick="event.stopPropagation(); openEditGoodWorkModal('${g.id}')" title="Edit">&#9999;&#65039;</button></td>
     </tr>`).join('');
 }
-
 function openEditGoodWorkModal(id){
   const g = goodWorkData.find(x => x.id === id);
   if(!g) return;
@@ -2878,15 +2653,12 @@ function deleteGoodWork(){
     .then(() => { toast('Removed.', 'ok'); closeModal('editGoodWorkModalOverlay'); })
     .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
-
-// --- Good Work Report ---
 function renderGoodWorkReportTable(){
   const body = document.getElementById('goodWorkRptTableBody');
   if(!body) return;
   const project = document.getElementById('goodWorkRptProject') ? document.getElementById('goodWorkRptProject').value : '';
   const fromDate = document.getElementById('goodWorkRptFrom') ? document.getElementById('goodWorkRptFrom').value : '';
   const toDate = document.getElementById('goodWorkRptTo') ? document.getElementById('goodWorkRptTo').value : '';
-
   const filtered = goodWorkData.filter(g => {
     if(project && g.project !== project) return false;
     if((fromDate || toDate) && g.createdAt && g.createdAt.toMillis){
@@ -2896,11 +2668,7 @@ function renderGoodWorkReportTable(){
     }
     return true;
   });
-
-  if(filtered.length === 0){
-    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No entries match these filters</b></div></td></tr>`;
-    return;
-  }
+  if(filtered.length === 0){ body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No entries match these filters</b></div></td></tr>`; return; }
   body.innerHTML = filtered.map(g => `
     <tr>
       <td>${timeAgo(g.createdAt)}</td>
@@ -2917,117 +2685,194 @@ function clearGoodWorkReportFilters(){
 }
 
 /* ============================================================
-   ROLE-TO-PROJECT STAFFING
-   Maps which roles are active on which projects. Stored as one document
-   per role in `projectStaffing/{roleId}` with a `projects: string[]`
-   field listing the project names that role is staffed on. Admin always
-   has access to all; non-admins with this feature enabled later could be
-   filtered to their staffed projects in upload/filter dropdowns (deferred
-   for now — this build records the mapping without yet enforcing it in
-   those dropdowns, so it can be turned on gradually).
+   USER ACCESS  (unified: roles + project staffing + page access per user)
 ============================================================ */
-let projectStaffingData = {}; // { [roleId]: { projects: string[] } }
+let pageAccessData = {};
+let userPageAccessData = {};
+let projectStaffingData = {};
 
+function listenPageAccess(){
+  const unsub = db.collection('rolePageAccess').onSnapshot(snap => {
+    const data = {};
+    snap.docs.forEach(d => { data[d.id] = d.data(); });
+    pageAccessData = data;
+    applyPageAccessToNav();
+  }, err => console.error('rolePageAccess listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+function listenUserPageAccess(){
+  const unsub = db.collection('userPageAccess').onSnapshot(snap => {
+    const data = {};
+    snap.docs.forEach(d => { data[d.id] = d.data(); });
+    userPageAccessData = data;
+    applyPageAccessToNav();
+  }, err => console.error('userPageAccess listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
 function listenProjectStaffing(){
   const unsub = db.collection('projectStaffing').onSnapshot(snap => {
     const data = {};
     snap.docs.forEach(d => { data[d.id] = d.data(); });
     projectStaffingData = data;
-    if(currentUser && currentUser.role === 'admin'){
-      renderStaffingLists();
-      renderStaffingResultTable();
-    }
   }, err => console.error('projectStaffing listener:', err));
   activeSessionUnsubs.push(unsub);
 }
 
-function renderStaffingLists(){
-  const roleSearch = (document.getElementById('staffingRoleSearch') ? document.getElementById('staffingRoleSearch').value : '').toLowerCase();
-  const projSearch = (document.getElementById('staffingProjectSearch') ? document.getElementById('staffingProjectSearch').value : '').toLowerCase();
-  const roleList = document.getElementById('staffingRoleList');
-  const projList = document.getElementById('staffingProjectList');
-  if(!roleList || !projList) return;
+function canAccessPage(pageKey){
+  if(!currentUser) return false;
+  if(currentUser.role === 'admin') return true;
+  if(!PAGE_ACCESS_ITEMS.some(i => i.key === pageKey)) return true;
+  const userAccess = userPageAccessData[currentUser.uid];
+  if(userAccess && userAccess.pages && (pageKey in userAccess.pages)){
+    return userAccess.pages[pageKey] !== false;
+  }
+  const myRoles = getUserRoles(currentUser);
+  if(myRoles.length === 0) return true;
+  return myRoles.some(roleId => {
+    const roleAccess = pageAccessData[roleId];
+    if(!roleAccess || !roleAccess.pages) return true;
+    if(!(pageKey in roleAccess.pages)) return true;
+    return roleAccess.pages[pageKey] !== false;
+  });
+}
 
-  const roles = Object.entries(ROLE_LABELS).filter(([id]) => id !== 'admin');
-  const projects = mastersData.projectMasters.filter(p => !p.parentId);
+function applyPageAccessToNav(){
+  if(!currentUser) return;
+  const activeEl = document.querySelector('.view.active');
+  const activeViewId = activeEl ? activeEl.id : null;
+  let activeViewNowHidden = false;
+  PAGE_ACCESS_ITEMS.forEach(item => {
+    const btn = document.querySelector(`.nav-item[data-view="${item.key}"]`);
+    if(!btn) return;
+    const allowed = canAccessPage(item.key);
+    btn.classList.toggle('hidden', !allowed);
+    if(item.key === activeViewId && !allowed) activeViewNowHidden = true;
+  });
+  if(activeViewNowHidden){
+    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
+    switchView(fallback ? fallback.key : 'uploadView');
+  }
+}
 
-  roleList.innerHTML = roles
-    .filter(([, name]) => !roleSearch || name.toLowerCase().includes(roleSearch))
-    .map(([id, name]) => {
-      const staffedProjects = (projectStaffingData[id] && projectStaffingData[id].projects) || [];
-      const badge = staffedProjects.length ? ` <span style="font-size:11px; color:var(--teal);">(${staffedProjects.length} project${staffedProjects.length === 1 ? '' : 's'})</span>` : '';
-      return `<label style="display:flex; align-items:center; gap:8px; padding:5px 4px; cursor:pointer; border-radius:5px;">
-        <input type="checkbox" class="staffing-role-cb" value="${escapeHtml(id)}" style="width:auto;">
-        <span>${escapeHtml(name)}${badge}</span>
-      </label>`;
-    }).join('');
+function populateUaUserSelect(){
+  const sel = document.getElementById('uaUserSelect');
+  if(!sel) return;
+  const prevValue = sel.value;
+  const nonAdmins = usersData.filter(u => u.role !== 'admin');
+  sel.innerHTML = '<option value="">Select a user&hellip;</option>' +
+    nonAdmins.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  if(nonAdmins.some(u => u.id === prevValue)) sel.value = prevValue;
+}
 
-  projList.innerHTML = projects
-    .filter(p => !projSearch || p.name.toLowerCase().includes(projSearch))
-    .map(p => `<label style="display:flex; align-items:center; gap:8px; padding:5px 4px; cursor:pointer; border-radius:5px;">
-      <input type="checkbox" class="staffing-proj-cb" value="${escapeHtml(p.name)}" style="width:auto;">
-      <span>${escapeHtml(p.name)}</span>
+function renderUserAccessPanel(){
+  const panel = document.getElementById('uaPanel');
+  if(!panel) return;
+  const uid = document.getElementById('uaUserSelect').value;
+  if(!uid){ panel.innerHTML = ''; return; }
+  const user = usersData.find(u => u.id === uid);
+  if(!user){ panel.innerHTML = ''; return; }
+
+  const userAdditionalRoles = new Set(user.roles || []);
+  const roleCheckboxes = Object.entries(ROLE_LABELS)
+    .filter(([id]) => id !== 'admin' && id !== user.role)
+    .map(([id, name]) => `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:5px;">
+      <input type="checkbox" class="ua-role-cb" value="${escapeHtml(id)}" style="width:auto;" ${userAdditionalRoles.has(id) ? 'checked' : ''}>
+      <span>${escapeHtml(name)}</span>
     </label>`).join('');
-}
 
-function resetStaffingSelection(){
-  document.querySelectorAll('.staffing-role-cb, .staffing-proj-cb').forEach(cb => { cb.checked = false; });
-  document.getElementById('staffingStatus').textContent = '';
-  document.getElementById('staffingResultPanel').style.display = 'none';
-}
+  const userProjects = new Set((projectStaffingData[uid] && projectStaffingData[uid].projects) || []);
+  const allProjects = mastersData.projectMasters.filter(p => !p.parentId);
+  const projectCheckboxes = allProjects.map(p => `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:5px;">
+    <input type="checkbox" class="ua-proj-cb" value="${escapeHtml(p.name)}" style="width:auto;" ${userProjects.has(p.name) ? 'checked' : ''}>
+    <span>${escapeHtml(p.name)}</span>
+  </label>`).join('');
 
-function saveStaffing(){
-  const selectedRoles = Array.from(document.querySelectorAll('.staffing-role-cb:checked')).map(cb => cb.value);
-  const selectedProjects = Array.from(document.querySelectorAll('.staffing-proj-cb:checked')).map(cb => cb.value);
-  if(selectedRoles.length === 0){ toast('Please select at least one role.', 'err'); return; }
-  if(selectedProjects.length === 0){ toast('Please select at least one project.', 'err'); return; }
-
-  const status = document.getElementById('staffingStatus');
-  status.textContent = 'Saving…';
-
-  // For each selected role, MERGE the selected projects into its existing
-  // staffed-project list (so staffing from prior Save calls is preserved,
-  // not overwritten) using arrayUnion — idempotent and safe to call
-  // multiple times with the same projects.
-  const promises = selectedRoles.map(roleId =>
-    db.collection('projectStaffing').doc(roleId).set(
-      { projects: firebase.firestore.FieldValue.arrayUnion(...selectedProjects) },
-      { merge: true }
-    )
-  );
-  Promise.all(promises)
-    .then(() => {
-      toast('Staffing saved.', 'ok');
-      status.textContent = `${selectedRoles.length} role${selectedRoles.length === 1 ? '' : 's'} staffed on ${selectedProjects.length} project${selectedProjects.length === 1 ? '' : 's'}.`;
-      renderStaffingResultTable();
-    })
-    .catch(err => { toast('Could not save: ' + err.message, 'err'); status.textContent = ''; });
-}
-
-function removeStaffing(roleId, projectName){
-  db.collection('projectStaffing').doc(roleId).update({
-    projects: firebase.firestore.FieldValue.arrayRemove(projectName)
-  }).then(() => toast('Removed.', 'ok'))
-    .catch(err => toast('Could not remove: ' + err.message, 'err'));
-}
-
-function renderStaffingResultTable(){
-  const panel = document.getElementById('staffingResultPanel');
-  const body = document.getElementById('staffingResultBody');
-  if(!panel || !body) return;
-  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
-  const staffedRoles = roleIds.filter(id => projectStaffingData[id] && (projectStaffingData[id].projects || []).length > 0);
-  if(staffedRoles.length === 0){ panel.style.display = 'none'; return; }
-  panel.style.display = '';
-  body.innerHTML = staffedRoles.map(id => {
-    const projects = projectStaffingData[id].projects || [];
-    const pills = projects.map(p =>
-      `<span class="step-chip approved" style="margin:2px;">${escapeHtml(p)}
-        <button onclick="removeStaffing('${escapeJs(id)}','${escapeJs(p)}')" style="border:none;background:none;cursor:pointer;font-size:11px;margin-left:3px;color:var(--text-muted);">&#x2715;</button>
-      </span>`
-    ).join('');
-    return `<tr><td>${escapeHtml(ROLE_LABELS[id] || id)}</td><td>${pills}</td></tr>`;
+  const userOverrides = (userPageAccessData[uid] && userPageAccessData[uid].pages) || {};
+  const myRoles = getUserRoles(user);
+  function roleDefaultFor(pageKey){
+    if(myRoles.length === 0) return true;
+    return myRoles.some(roleId => {
+      const roleAccess = pageAccessData[roleId];
+      if(!roleAccess || !roleAccess.pages) return true;
+      if(!(pageKey in roleAccess.pages)) return true;
+      return roleAccess.pages[pageKey] !== false;
+    });
+  }
+  const pageRows = PAGE_ACCESS_ITEMS.map(item => {
+    const hasOverride = item.key in userOverrides;
+    const roleDefault = roleDefaultFor(item.key);
+    const effective = hasOverride ? userOverrides[item.key] !== false : roleDefault;
+    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:5px;">
+      <input type="checkbox" class="ua-page-cb" value="${item.key}" style="width:auto;" ${effective ? 'checked' : ''}>
+      <span>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</span>
+    </label>`;
   }).join('');
+
+  panel.innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+      <div class="card" style="padding:16px;">
+        <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:12px;">Roles</div>
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px;">Primary role: <b>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</b> (change via Edit User)</div>
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">Additional roles:</div>
+        ${roleCheckboxes || '<div class="master-empty">No other roles defined yet.</div>'}
+      </div>
+      <div class="card" style="padding:16px;">
+        <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:12px;">Project Access</div>
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">Projects this user is staffed on:</div>
+        ${projectCheckboxes || '<div class="master-empty">No projects in Manage Projects yet.</div>'}
+      </div>
+    </div>
+    <div class="card" style="padding:16px; margin-bottom:16px;">
+      <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:10px;">Page Access</div>
+      <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">Pages this user can see. <b>Custom</b> means a per-user override is already set; everything else follows their role(s) by default.</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:4px;">${pageRows}</div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn btn-teal" id="uaSaveBtn" onclick="saveUserAccess('${uid}')">Save</button>
+      <button class="btn btn-ghost" onclick="resetUserAccess('${uid}')">Reset page access to defaults</button>
+    </div>
+  `;
+}
+
+function saveUserAccess(uid){
+  const user = usersData.find(u => u.id === uid);
+  if(!user) return;
+  const additionalRoles = Array.from(document.querySelectorAll('.ua-role-cb:checked')).map(cb => cb.value);
+  const selectedProjects = Array.from(document.querySelectorAll('.ua-proj-cb:checked')).map(cb => cb.value);
+  const myRoles = [...getUserRoles({ role: user.role, roles: additionalRoles })];
+  function roleDefaultFor(pageKey){
+    if(myRoles.length === 0) return true;
+    return myRoles.some(roleId => {
+      const roleAccess = pageAccessData[roleId];
+      if(!roleAccess || !roleAccess.pages) return true;
+      if(!(pageKey in roleAccess.pages)) return true;
+      return roleAccess.pages[pageKey] !== false;
+    });
+  }
+  const pageDiff = {};
+  PAGE_ACCESS_ITEMS.forEach(item => {
+    const cb = document.querySelector(`.ua-page-cb[value="${item.key}"]`);
+    if(!cb) return;
+    if(cb.checked !== roleDefaultFor(item.key)) pageDiff[item.key] = cb.checked;
+  });
+  const btn = document.getElementById('uaSaveBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  Promise.all([
+    db.collection('users').doc(uid).update({ roles: additionalRoles }),
+    db.collection('projectStaffing').doc(uid).set({ projects: selectedProjects }),
+    Object.keys(pageDiff).length > 0
+      ? db.collection('userPageAccess').doc(uid).set({ pages: pageDiff })
+      : db.collection('userPageAccess').doc(uid).delete().catch(() => {})
+  ]).then(() => toast('Saved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'))
+    .finally(() => { if(btn){ btn.disabled = false; btn.textContent = 'Save'; } });
+}
+
+function resetUserAccess(uid){
+  if(!confirm("Clear all custom page-access overrides for this user? Their page access will follow their roles' defaults again.")) return;
+  db.collection('userPageAccess').doc(uid).delete()
+    .then(() => { toast('Page access reset to role defaults.', 'ok'); renderUserAccessPanel(); })
+    .catch(err => toast('Could not reset: ' + err.message, 'err'));
 }
 
 function startListeners(){
@@ -3047,7 +2892,7 @@ function startListeners(){
   listenMaterialTestLogs();
   listenFinalSnagPoints();
   listenGoodWork();
-  if(currentUser.role === 'admin') listenProjectStaffing();
+  listenProjectStaffing();
   listenPageAccess();
   listenUserPageAccess();
   listenUsers(); // needed by everyone now, not just admins — populates Site Engineer/Project Manager selects for Final Snag Point
