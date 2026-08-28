@@ -2583,17 +2583,33 @@ function renderPageAccessView(){
       const allowed = (pageAccessData[roleId] && pageAccessData[roleId].pages && (item.key in pageAccessData[roleId].pages))
         ? pageAccessData[roleId].pages[item.key] !== false
         : true;
-      return `<td style="text-align:center;"><input type="checkbox" ${allowed ? 'checked' : ''} onchange="togglePageAccess('${roleId}','${item.key}',this.checked)"></td>`;
+      return `<td style="text-align:center;"><input type="checkbox" id="roleAccessCb_${roleId}_${item.key}" ${allowed ? 'checked' : ''}></td>`;
     }).join('');
     return `<tr><td>${escapeHtml(item.label)}</td>${cells}</tr>`;
   }).join('');
-  panel.innerHTML = `<table><thead><tr><th>Page</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
+  panel.innerHTML = `
+    <table><thead><tr><th>Page</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>
+    <div style="margin-top:16px;"><button class="btn btn-teal" id="roleAccessSaveBtn" onclick="saveRolePageAccess()">Save</button></div>
+  `;
 }
 
-function togglePageAccess(roleId, pageKey, checked){
-  db.collection('rolePageAccess').doc(roleId).set({ pages: { [pageKey]: checked } }, { merge: true })
+function saveRolePageAccess(){
+  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
+  const btn = document.getElementById('roleAccessSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const batch = db.batch();
+  roleIds.forEach(roleId => {
+    const pages = {};
+    PAGE_ACCESS_ITEMS.forEach(item => {
+      const cb = document.getElementById(`roleAccessCb_${roleId}_${item.key}`);
+      if(cb) pages[item.key] = cb.checked;
+    });
+    batch.set(db.collection('rolePageAccess').doc(roleId), { pages });
+  });
+  batch.commit()
     .then(() => toast('Saved.', 'ok'))
-    .catch(err => toast('Could not save: ' + err.message, 'err'));
+    .catch(err => toast('Could not save: ' + err.message, 'err'))
+    .finally(() => { btn.disabled = false; btn.textContent = 'Save'; });
 }
 
 // --- Per-user overrides ---
@@ -2620,28 +2636,45 @@ function renderUserPageAccessRow(){
 
   const rows = PAGE_ACCESS_ITEMS.map(item => {
     const hasOverride = item.key in userOverrides;
-    const effective = hasOverride
-      ? userOverrides[item.key] !== false
-      : (roleAccess && roleAccess.pages && (item.key in roleAccess.pages) ? roleAccess.pages[item.key] !== false : true);
+    const roleDefault = (roleAccess && roleAccess.pages && (item.key in roleAccess.pages)) ? roleAccess.pages[item.key] !== false : true;
+    const effective = hasOverride ? userOverrides[item.key] !== false : roleDefault;
     return `<tr>
       <td>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</td>
-      <td style="text-align:center;"><input type="checkbox" ${effective ? 'checked' : ''} onchange="toggleUserPageAccess('${uid}','${item.key}',this.checked)"></td>
+      <td style="text-align:center;"><input type="checkbox" id="userAccessCb_${item.key}" data-role-default="${roleDefault}" ${effective ? 'checked' : ''}></td>
     </tr>`;
   }).join('');
 
   wrap.innerHTML = `
     <div style="margin:14px 0 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-      <div style="font-size:12.5px; color:var(--text-muted);">Role default: <b>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</b>. Checking/unchecking a box below creates a custom override for ${escapeHtml(user.name)} specifically &mdash; everything else still follows their role.</div>
+      <div style="font-size:12.5px; color:var(--text-muted);">Role default: <b>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</b>. The boxes below start from that role's access &mdash; check/uncheck to set an exception just for ${escapeHtml(user.name)}, then click Save.</div>
       <button class="btn btn-ghost btn-sm" onclick="resetUserPageAccess('${uid}')" ${hasAnyOverride ? '' : 'disabled'}>Reset to role defaults</button>
     </div>
     <table><thead><tr><th>Page</th><th style="width:90px;">Access</th></tr></thead><tbody>${rows}</tbody></table>
+    <div style="margin-top:16px;"><button class="btn btn-teal" id="userAccessSaveBtn" onclick="saveUserPageAccess('${uid}')">Save</button></div>
   `;
 }
 
-function toggleUserPageAccess(uid, pageKey, checked){
-  db.collection('userPageAccess').doc(uid).set({ pages: { [pageKey]: checked } }, { merge: true })
-    .then(() => toast('Saved.', 'ok'))
-    .catch(err => toast('Could not save: ' + err.message, 'err'));
+function saveUserPageAccess(uid){
+  const btn = document.getElementById('userAccessSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  // Only pages where the checkbox now DIFFERS from the role's own default
+  // become an explicit override — anything left matching the role isn't
+  // stored at all, so "Custom" stays meaningful and a page nobody touched
+  // keeps tracking the role automatically if that role changes later.
+  const diff = {};
+  PAGE_ACCESS_ITEMS.forEach(item => {
+    const cb = document.getElementById(`userAccessCb_${item.key}`);
+    if(!cb) return;
+    const roleDefault = cb.dataset.roleDefault === 'true';
+    if(cb.checked !== roleDefault) diff[item.key] = cb.checked;
+  });
+  const hasDiff = Object.keys(diff).length > 0;
+  const p = hasDiff
+    ? db.collection('userPageAccess').doc(uid).set({ pages: diff })
+    : db.collection('userPageAccess').doc(uid).delete();
+  p.then(() => toast('Saved.', 'ok'))
+   .catch(err => toast('Could not save: ' + err.message, 'err'))
+   .finally(() => { btn.disabled = false; btn.textContent = 'Save'; });
 }
 function resetUserPageAccess(uid){
   if(!confirm("Remove all custom page-access overrides for this user? They'll go back to following their role's defaults.")) return;
