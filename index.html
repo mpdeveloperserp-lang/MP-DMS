@@ -415,7 +415,7 @@
   </div>
 
   <div class="sidebar">
-    <div class="nav-group-label">Lifecycle</div>
+    <div class="nav-group-label">Document Management</div>
     <button class="nav-item active" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
     <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
@@ -978,8 +978,29 @@
     <!-- ---------------- WORKFLOW CONFIGURATION VIEW (admin only) ---------------- -->
     <div class="view" id="workflowConfigView">
       <div class="view-head"><h2>Workflow Configuration</h2></div>
-      <div class="view-sub">One workflow per Document Category, listed automatically &mdash; click a category to configure it directly. No manual ordering needed: add mappings with a Role, a From Status, and a To Status, and the sequence is worked out by matching each step's To Status to the next step's From Status. Steps sharing a From Status run in parallel. Changes only apply to documents uploaded <b>after</b> saving &mdash; documents already in progress keep the workflow that was active when they were uploaded.</div>
-      <div class="card panel" id="workflowConfigPanel"></div>
+      <div class="view-sub">Select a module to configure its approval workflows. Changes only apply to items created <b>after</b> saving.</div>
+
+      <!-- Module selector tabs -->
+      <div style="display:flex; gap:10px; margin-bottom:24px;">
+        <button id="wfTabDms" onclick="switchWfModule('dms')" class="btn btn-teal" style="min-width:180px; padding:10px 20px; font-size:14px;">
+          &#128193; Document Management
+        </button>
+        <button id="wfTabQc" onclick="switchWfModule('qc')" class="btn btn-ghost" style="min-width:180px; padding:10px 20px; font-size:14px;">
+          &#9989; Quality Control
+        </button>
+      </div>
+
+      <!-- DMS panel -->
+      <div id="wfPanelDms">
+        <div class="view-sub" style="margin-bottom:12px;">One workflow per Document Category &mdash; click a category to configure it directly. No manual ordering needed: add mappings with a Role, a From Status, and a To Status, and the sequence is worked out by matching each step&rsquo;s To Status to the next step&rsquo;s From Status. Steps sharing a From Status run in parallel.</div>
+        <div class="card panel" id="workflowConfigPanel"></div>
+      </div>
+
+      <!-- QC panel -->
+      <div id="wfPanelQc" style="display:none;">
+        <div class="view-sub" style="margin-bottom:12px;">One workflow per QC Category &mdash; click a category to configure its approval steps. The same auto-sequencing applies: match each step&rsquo;s To Status to the next step&rsquo;s From Status.</div>
+        <div class="card panel" id="qcWorkflowConfigPanel"></div>
+      </div>
     </div>
 
     <!-- ---------------- STATUS LABELS VIEW (admin only) ---------------- -->
@@ -1547,6 +1568,7 @@ function switchView(viewId, opts){
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view===viewId));
   document.getElementById('notifPanel').classList.remove('active');
   if(viewId === 'userAccessView' && typeof populateUaUserSelect === 'function') populateUaUserSelect();
+  if(viewId === 'workflowConfigView' && typeof switchWfModule === 'function') switchWfModule(typeof activeWfModule !== 'undefined' ? activeWfModule : 'dms');
   if(!opts.skipHistory){
     history.pushState({ view: viewId }, '', '#' + viewId);
   }
