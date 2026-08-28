@@ -572,7 +572,7 @@ function submitResubmission(){
    dropdowns; sub-items are an organizational reference for now.
 ============================================================ */
 const MASTER_TYPES = [
-  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
+  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject','qcObsProject','qcInspProject','matLogProject','matRptProject','snagProject','snagRptProject','editSnagProject'],
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
     inUseMessage: 'This project is in use and cannot be deleted.',
@@ -586,10 +586,20 @@ const MASTER_TYPES = [
     hasSubItems: true, panelId: 'categoriesMasterPanel',
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
     inUseMessage: 'This document category is already in use and cannot be deleted.',
-    isInUse: item => allDocsSnapshot.some(d => d.category === item.name) }
+    isInUse: item => allDocsSnapshot.some(d => d.category === item.name) },
+  { key: 'qcCategoryMasters', label: 'QC Categories', singular: 'QC category', selects: ['qcObsCategory'],
+    hasSubItems: false, panelId: 'qcCategoriesMasterPanel',
+    starter: ['Civil','Electrical','Plumbing','Finishing','Structural'],
+    inUseMessage: 'This QC category is in use and cannot be deleted.',
+    isInUse: item => qcObservationsData.some(o => o.qcCategory === item.name) },
+  { key: 'materialMasters', label: 'Materials', singular: 'material', selects: ['materialTestDetailMaterial','matLogMaterial','matRptMaterial'],
+    hasSubItems: false, panelId: 'materialsMasterPanel',
+    starter: ['Solid Block','AAC Blocks','Rebar 12mm TMT','Cube Test','Soil Test Report'],
+    inUseMessage: 'This material is in use and cannot be deleted.',
+    isInUse: item => materialTestDetailsData.some(d => d.materialId === item.id) || materialTestLogsData.some(l => l.materialId === item.id) }
 ];
-let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [] };
-let expandedMasterItems = { projectMasters: new Set(), departmentMasters: new Set(), categoryMasters: new Set() };
+let mastersData = { projectMasters: [], departmentMasters: [], categoryMasters: [], qcCategoryMasters: [], materialMasters: [] };
+let expandedMasterItems = { projectMasters: new Set(), departmentMasters: new Set(), categoryMasters: new Set(), qcCategoryMasters: new Set(), materialMasters: new Set() };
 let editingMasterItem = null; // { typeKey, id }
 
 function listenMasters(){
@@ -1318,6 +1328,7 @@ let editingUserId = null;
 function listenUsers(){
   const unsub = db.collection('users').orderBy('name').onSnapshot(snap => {
     usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    populateSnagUserSelects();
     if(currentUser && currentUser.role === 'admin'){
       renderUsersView();
       refreshMasterDataPanels(); // department "in use" status depends on this data
@@ -1448,6 +1459,1044 @@ function submitCreateUser(){
 // registration screen too).
 let activeSessionUnsubs = [];
 
+/* ============================================================
+   QC OBSERVATION LIFECYCLE
+   A site quality observation moves through: open -> rectified -> rechecked
+   -> approved (or back to open, with rejectReason/rejectCount incremented,
+   if the Project Head rejects at final approval). Unlike the document
+   approval engine, this first phase is intentionally NOT role-gated — any
+   signed-in user can act at any stage. Deferred for a later phase: QC
+   Codes master, the standalone exportable report screens, and per-stage
+   role restrictions (e.g. only a "Project Head" role can approve).
+============================================================ */
+let qcObservationsData = [];
+let qcObsFile = null;
+let qcRectifyFile = null;
+let activeQcObservationId = null;
+
+function listenQcObservations(){
+  const unsub = db.collection('qcObservations').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    qcObservationsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderQcObsTable();
+    renderQcRectifyTable();
+    renderQcRecheckTable();
+    renderQcPhApprovalTable();
+    refreshMasterDataPanels(); // QC category "in use" status depends on this data
+  }, err => console.error('qcObservations listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function qcSeverityBadge(sev){
+  const map = { minor: 'st-pending_review', major: 'st-pending_approval', critical: 'st-rejected' };
+  const label = { minor: 'Minor', major: 'Major', critical: 'Critical' };
+  return `<span class="badge ${map[sev] || ''}"><span class="dot"></span>${label[sev] || sev}</span>`;
+}
+function qcStatusBadge(status){
+  const map = { open: 'st-pending_review', rectified: 'st-pending_approval', rechecked: 'st-approved', approved: 'st-published', rejected: 'st-rejected' };
+  const label = { open: 'Open', rectified: 'Rectified', rechecked: 'Rechecked', approved: 'Approved', rejected: 'Rejected' };
+  return `<span class="badge ${map[status] || ''}"><span class="dot"></span>${label[status] || status}</span>`;
+}
+
+// --- Log Observation form ---
+(function wireQcObsDropzone(){
+  const dz = document.getElementById('qcObsDropzone');
+  const fi = document.getElementById('qcObsFile');
+  if(dz && fi){
+    fi.addEventListener('change', () => {
+      qcObsFile = fi.files[0] || null;
+      document.getElementById('qcObsFilePillWrap').innerHTML = qcObsFile ? `<div class="file-pill">${escapeHtml(qcObsFile.name)}</div>` : '';
+    });
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', e => {
+      e.preventDefault(); dz.classList.remove('drag');
+      if(e.dataTransfer.files[0]){ fi.files = e.dataTransfer.files; qcObsFile = e.dataTransfer.files[0]; document.getElementById('qcObsFilePillWrap').innerHTML = `<div class="file-pill">${escapeHtml(qcObsFile.name)}</div>`; }
+    });
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const dateInput = document.getElementById('qcObsDate');
+  if(dateInput) dateInput.value = today;
+})();
+
+function handleQcObservationSubmit(ev){
+  ev.preventDefault();
+  const meta = {
+    project: document.getElementById('qcObsProject').value,
+    inspectionDate: document.getElementById('qcObsDate').value,
+    flat: document.getElementById('qcObsFlat').value.trim(),
+    location: document.getElementById('qcObsLocation').value.trim(),
+    qcCategory: document.getElementById('qcObsCategory').value,
+    severity: document.getElementById('qcObsSeverity').value,
+    observation: document.getElementById('qcObsText').value.trim()
+  };
+  if(!meta.project || !meta.location || !meta.qcCategory || !meta.severity || !meta.observation){
+    toast('Please fill in all required fields.', 'err');
+    return false;
+  }
+  const btn = document.getElementById('qcObsSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const repeatCount = qcObservationsData.filter(o => o.qcCategory === meta.qcCategory).length + 1;
+
+  const finish = (attachmentURL) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('qcObservations').add({
+      ...meta, attachmentURL: attachmentURL || null, repeatCount,
+      status: 'open', rejectCount: 0,
+      inspectedBy: currentUser.uid, inspectedByName: currentUser.name,
+      createdAt: now, updatedAt: now
+    }).then(() => {
+      toast('Observation logged.', 'ok');
+      document.getElementById('qcObsForm').reset();
+      qcObsFile = null;
+      document.getElementById('qcObsFilePillWrap').innerHTML = '';
+      document.getElementById('qcObsDate').value = new Date().toISOString().slice(0, 10);
+    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Add Observation'; document.getElementById('qcObsProgressWrap').style.display = 'none'; });
+  };
+
+  if(qcObsFile){
+    const path = `qcObservations/${Date.now()}_${qcObsFile.name}`;
+    const task = storage.ref(path).put(qcObsFile);
+    document.getElementById('qcObsProgressWrap').style.display = 'block';
+    task.on('state_changed',
+      snap => { document.getElementById('qcObsProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Add Observation'; },
+      () => task.snapshot.ref.getDownloadURL().then(finish)
+    );
+  } else {
+    finish(null);
+  }
+  return false;
+}
+
+function renderQcObsTable(){
+  const body = document.getElementById('qcObsTableBody');
+  if(!body) return;
+  if(qcObservationsData.length === 0){
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>No observations logged yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = qcObservationsData.map(o => `
+    <tr>
+      <td>${escapeHtml(o.project || '—')}</td>
+      <td>${escapeHtml(o.location || '—')}${o.flat ? ` &middot; ${escapeHtml(o.flat)}` : ''}</td>
+      <td>${escapeHtml(o.qcCategory || '—')}</td>
+      <td>${qcSeverityBadge(o.severity)}</td>
+      <td style="max-width:320px;">${escapeHtml(o.observation || '—')}</td>
+      <td>${qcStatusBadge(o.status)}</td>
+      <td>${timeAgo(o.createdAt)}</td>
+    </tr>`).join('');
+}
+
+// --- Rectify ---
+function renderQcRectifyTable(){
+  const body = document.getElementById('qcRectifyTableBody');
+  const openItems = qcObservationsData.filter(o => o.status === 'open');
+  const badge = document.getElementById('qcRectifyBadge');
+  if(badge){ badge.textContent = openItems.length; badge.classList.toggle('hidden', openItems.length === 0); }
+  if(!body) return;
+  if(openItems.length === 0){
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>Nothing awaiting rectification</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = openItems.map(o => `
+    <tr>
+      <td>${escapeHtml(o.project || '—')}</td>
+      <td>${escapeHtml(o.location || '—')}${o.flat ? ` &middot; ${escapeHtml(o.flat)}` : ''}</td>
+      <td>${escapeHtml(o.qcCategory || '—')}</td>
+      <td>${qcSeverityBadge(o.severity)}</td>
+      <td style="max-width:320px;">${escapeHtml(o.observation || '—')}${o.rejectReason ? `<div style="color:var(--red); font-size:11.5px; margin-top:4px;">Sent back: ${escapeHtml(o.rejectReason)}</div>` : ''}</td>
+      <td>${timeAgo(o.createdAt)}</td>
+      <td><button class="btn btn-teal btn-sm" onclick="openQcRectifyModal('${o.id}')">Rectify</button></td>
+    </tr>`).join('');
+}
+function openQcRectifyModal(id){
+  activeQcObservationId = id;
+  document.getElementById('qcRectifyRemarks').value = '';
+  document.getElementById('qcRectifyFile').value = '';
+  qcRectifyFile = null;
+  openModal('qcRectifyModalOverlay');
+}
+function submitQcRectify(){
+  const id = activeQcObservationId;
+  const remarks = document.getElementById('qcRectifyRemarks').value.trim();
+  const file = document.getElementById('qcRectifyFile').files[0] || null;
+  const btn = document.getElementById('qcRectifyConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  const finish = (imageURL) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('qcObservations').doc(id).update({
+      status: 'rectified', rectifiedBy: currentUser.uid, rectifiedByName: currentUser.name,
+      rectifiedAt: now, rectifiedRemarks: remarks || null, rectifiedImageURL: imageURL || null, updatedAt: now
+    }).then(() => { toast('Marked as rectified.', 'ok'); closeModal('qcRectifyModalOverlay'); })
+      .catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Mark Rectified'; document.getElementById('qcRectifyProgressWrap').style.display = 'none'; });
+  };
+  if(file){
+    const path = `qcObservations/rectify_${Date.now()}_${file.name}`;
+    const task = storage.ref(path).put(file);
+    document.getElementById('qcRectifyProgressWrap').style.display = 'block';
+    task.on('state_changed',
+      snap => { document.getElementById('qcRectifyProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Mark Rectified'; },
+      () => task.snapshot.ref.getDownloadURL().then(finish)
+    );
+  } else {
+    finish(null);
+  }
+}
+
+// --- Recheck ---
+function renderQcRecheckTable(){
+  const body = document.getElementById('qcRecheckTableBody');
+  const items = qcObservationsData.filter(o => o.status === 'rectified');
+  const badge = document.getElementById('qcRecheckBadge');
+  if(badge){ badge.textContent = items.length; badge.classList.toggle('hidden', items.length === 0); }
+  if(!body) return;
+  if(items.length === 0){
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>Nothing awaiting recheck</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = items.map(o => `
+    <tr>
+      <td>${escapeHtml(o.project || '—')}</td>
+      <td>${escapeHtml(o.location || '—')}${o.flat ? ` &middot; ${escapeHtml(o.flat)}` : ''}</td>
+      <td style="max-width:280px;">${escapeHtml(o.observation || '—')}</td>
+      <td>${o.attachmentURL ? `<a href="${o.attachmentURL}" target="_blank" rel="noopener"><img src="${o.attachmentURL}" style="width:48px; height:48px; object-fit:cover; border-radius:6px;"></a>` : '—'}</td>
+      <td>${escapeHtml(o.rectifiedByName || '—')}${o.rectifiedRemarks ? `<div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(o.rectifiedRemarks)}</div>` : ''}</td>
+      <td>${o.rectifiedImageURL ? `<a href="${o.rectifiedImageURL}" target="_blank" rel="noopener"><img src="${o.rectifiedImageURL}" style="width:48px; height:48px; object-fit:cover; border-radius:6px;"></a>` : '—'}</td>
+      <td><button class="btn btn-teal btn-sm" onclick="openQcRecheckModal('${o.id}')">Recheck</button></td>
+    </tr>`).join('');
+}
+function openQcRecheckModal(id){
+  activeQcObservationId = id;
+  document.getElementById('qcRecheckStatus').value = 'ok';
+  document.getElementById('qcRecheckRemarks').value = '';
+  openModal('qcRecheckModalOverlay');
+}
+function submitQcRecheck(){
+  const id = activeQcObservationId;
+  const reviewStatus = document.getElementById('qcRecheckStatus').value;
+  const remarks = document.getElementById('qcRecheckRemarks').value.trim();
+  const now = firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('qcObservations').doc(id).update({
+    status: 'rechecked', reviewStatus, recheckRemarks: remarks || null,
+    recheckedBy: currentUser.uid, recheckedByName: currentUser.name, recheckedAt: now, updatedAt: now
+  }).then(() => { toast('Recheck confirmed.', 'ok'); closeModal('qcRecheckModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
+// --- PH Approval ---
+function renderQcPhApprovalTable(){
+  const body = document.getElementById('qcPhApprovalTableBody');
+  const items = qcObservationsData.filter(o => o.status === 'rechecked');
+  const badge = document.getElementById('qcPhApprovalBadge');
+  if(badge){ badge.textContent = items.length; badge.classList.toggle('hidden', items.length === 0); }
+  if(!body) return;
+  if(items.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Nothing awaiting approval</b></div></td></tr>`;
+    return;
+  }
+  const reviewLabel = { ok: 'Ok', done: 'Done', closed: 'Closed' };
+  body.innerHTML = items.map(o => `
+    <tr>
+      <td>${escapeHtml(o.project || '—')}</td>
+      <td>${escapeHtml(o.location || '—')}${o.flat ? ` &middot; ${escapeHtml(o.flat)}` : ''}</td>
+      <td style="max-width:280px;">${escapeHtml(o.observation || '—')}</td>
+      <td>${escapeHtml(reviewLabel[o.reviewStatus] || o.reviewStatus || '—')}</td>
+      <td>${escapeHtml(o.recheckRemarks || '—')}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-teal btn-sm" onclick="approveQcObservation('${o.id}')">Approve</button>
+        <button class="btn btn-sm" style="background:var(--red); color:#fff;" onclick="openQcPhRejectModal('${o.id}')">Reject</button>
+      </td>
+    </tr>`).join('');
+}
+function approveQcObservation(id){
+  const now = firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('qcObservations').doc(id).update({
+    status: 'approved', phApprovedBy: currentUser.uid, phApprovedByName: currentUser.name, phApprovedAt: now, updatedAt: now
+  }).then(() => toast('Observation approved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function openQcPhRejectModal(id){
+  activeQcObservationId = id;
+  document.getElementById('qcPhRejectReason').value = '';
+  openModal('qcPhRejectModalOverlay');
+}
+function submitQcPhReject(){
+  const id = activeQcObservationId;
+  const reason = document.getElementById('qcPhRejectReason').value.trim();
+  if(!reason){ toast('Please enter a reason.', 'err'); return; }
+  const item = qcObservationsData.find(o => o.id === id);
+  const now = firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('qcObservations').doc(id).update({
+    status: 'open', rejectReason: reason, rejectCount: (item ? (item.rejectCount || 0) : 0) + 1,
+    phRejectedBy: currentUser.uid, phRejectedByName: currentUser.name, phRejectedAt: now, updatedAt: now
+  }).then(() => { toast('Sent back for rectification.', 'ok'); closeModal('qcPhRejectModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
+
+
+/* ============================================================
+   QC CHECKLIST
+   QC Activities are checklist templates (with MEP/TAT/Checklist No.
+   metadata); QC Checklist Details are the individual check items under
+   an Activity — reference documentation, not individually ticked off
+   during an inspection. A QC Checklist Inspection logs that an Activity's
+   checklist was performed at a given project/unit/location, with up to 3
+   photos, then goes through a single Approve/Reject stage. The reference
+   design has three sequential approval screens (SE/PH/QC) for this — this
+   phase deliberately collapses them into one, like the QC Observation
+   phase's role-gating simplification.
+============================================================ */
+let qcActivitiesData = [];
+let qcActivityDetailsData = [];
+let qcChecklistInspectionsData = [];
+let editingQcActivityId = null;
+let editingQcActivityDetailId = null;
+let qcInspFilesArr = [];
+let activeQcChecklistInspectionId = null;
+
+function listenQcActivities(){
+  const unsub = db.collection('qcActivityMasters').orderBy('name').onSnapshot(snap => {
+    qcActivitiesData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    populateQcActivitySelects();
+    if(currentUser && currentUser.role === 'admin') renderQcActivityTable();
+    renderQcInspTable();
+    renderQcChecklistApprovalTable();
+  }, err => console.error('qcActivityMasters listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+function listenQcActivityDetails(){
+  const unsub = db.collection('qcActivityDetails').onSnapshot(snap => {
+    qcActivityDetailsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin') renderQcActivityDetailTable();
+  }, err => console.error('qcActivityDetails listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+function listenQcChecklistInspections(){
+  const unsub = db.collection('qcChecklistInspections').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    qcChecklistInspectionsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderQcInspTable();
+    renderQcChecklistApprovalTable();
+  }, err => console.error('qcChecklistInspections listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function populateQcActivitySelects(){
+  const optionsHtml = '<option value="">Select&hellip;</option>' +
+    qcActivitiesData.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+  ['qcActivityDetailActivity', 'qcInspActivity'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    if(!sel) return;
+    const prevValue = sel.value;
+    sel.innerHTML = optionsHtml;
+    if(qcActivitiesData.some(a => a.id === prevValue)) sel.value = prevValue;
+  });
+}
+
+// --- QC Activities (admin master, multi-field so it doesn't fit the
+// generic single-name MASTER_TYPES pattern — built as its own small
+// inline-edit form, same shape as Manage Users) ---
+function isQcActivityInUse(id){
+  return qcActivityDetailsData.some(d => d.activityId === id) || qcChecklistInspectionsData.some(i => i.activityId === id);
+}
+function renderQcActivityTable(){
+  const body = document.getElementById('qcActivityTableBody');
+  if(!body) return;
+  if(qcActivitiesData.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No QC Activities yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = qcActivitiesData.map(a => {
+    const inUse = isQcActivityInUse(a.id);
+    return `<tr>
+      <td>${escapeHtml(a.name)}</td>
+      <td>${escapeHtml(a.category || '—')}</td>
+      <td>${a.tat != null ? escapeHtml(String(a.tat)) : '—'}</td>
+      <td>${escapeHtml(a.checklistNo || '—')}</td>
+      <td>${a.mep ? 'Yes' : 'No'}</td>
+      <td style="text-align:right;">
+        <button class="icon-btn-sm" onclick="startQcActivityEdit('${a.id}')" title="Edit">&#9999;&#65039;</button>
+        <button class="icon-btn-sm" onclick="deleteQcActivity('${a.id}')" title="${inUse ? 'In use — delete disabled' : 'Delete'}" ${inUse ? 'disabled' : ''}>&#128465;&#65039;</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function submitQcActivity(ev){
+  ev.preventDefault();
+  const name = document.getElementById('qcActivityName').value.trim();
+  const category = document.getElementById('qcActivityCategory').value.trim();
+  const tatRaw = document.getElementById('qcActivityTat').value;
+  const checklistNo = document.getElementById('qcActivityChecklistNo').value.trim();
+  const mep = document.getElementById('qcActivityMep').checked;
+  if(!name){ toast('Please enter a name.', 'err'); return false; }
+  const data = { name, category: category || 'New', tat: tatRaw ? Number(tatRaw) : null, checklistNo: checklistNo || null, mep };
+  const editingId = editingQcActivityId;
+  const dup = qcActivitiesData.some(a => a.id !== editingId && a.name.toLowerCase() === name.toLowerCase());
+  if(dup){ toast('A QC Activity with this name already exists.', 'err'); return false; }
+  const p = editingId
+    ? db.collection('qcActivityMasters').doc(editingId).update(data)
+    : db.collection('qcActivityMasters').add({ ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  p.then(() => { toast(editingId ? 'Saved.' : 'Added.', 'ok'); cancelQcActivityEdit(); })
+   .catch(err => toast('Could not save: ' + err.message, 'err'));
+  return false;
+}
+function startQcActivityEdit(id){
+  const a = qcActivitiesData.find(x => x.id === id);
+  if(!a) return;
+  editingQcActivityId = id;
+  document.getElementById('qcActivityName').value = a.name || '';
+  document.getElementById('qcActivityCategory').value = a.category || 'New';
+  document.getElementById('qcActivityTat').value = a.tat != null ? a.tat : '';
+  document.getElementById('qcActivityChecklistNo').value = a.checklistNo || '';
+  document.getElementById('qcActivityMep').checked = !!a.mep;
+  document.getElementById('qcActivitySubmitBtn').textContent = 'Update';
+  document.getElementById('qcActivityCancelBtn').style.display = 'inline-flex';
+}
+function cancelQcActivityEdit(){
+  editingQcActivityId = null;
+  document.getElementById('qcActivityForm').reset();
+  document.getElementById('qcActivityCategory').value = 'New';
+  document.getElementById('qcActivitySubmitBtn').textContent = 'Save';
+  document.getElementById('qcActivityCancelBtn').style.display = 'none';
+}
+function deleteQcActivity(id){
+  if(isQcActivityInUse(id)){ toast('This QC Activity is in use and cannot be deleted.', 'err'); return; }
+  const a = qcActivitiesData.find(x => x.id === id);
+  if(!confirm(`Are you sure you want to delete this QC Activity?\n\n"${a ? a.name : ''}"`)) return;
+  db.collection('qcActivityMasters').doc(id).delete()
+    .then(() => toast('Removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+// --- QC Checklist Details ---
+function renderQcActivityDetailTable(){
+  const body = document.getElementById('qcActivityDetailTableBody');
+  if(!body) return;
+  if(qcActivityDetailsData.length === 0){
+    body.innerHTML = `<tr><td colspan="3"><div class="empty-state"><b>No checklist details yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = qcActivityDetailsData.map(d => {
+    const activity = qcActivitiesData.find(a => a.id === d.activityId);
+    return `<tr>
+      <td>${escapeHtml(activity ? activity.name : '—')}</td>
+      <td>${escapeHtml(d.detail)}</td>
+      <td style="text-align:right;">
+        <button class="icon-btn-sm" onclick="startQcActivityDetailEdit('${d.id}')" title="Edit">&#9999;&#65039;</button>
+        <button class="icon-btn-sm" onclick="deleteQcActivityDetail('${d.id}')" title="Delete">&#128465;&#65039;</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function submitQcActivityDetail(ev){
+  ev.preventDefault();
+  const activityId = document.getElementById('qcActivityDetailActivity').value;
+  const detail = document.getElementById('qcActivityDetailText').value.trim();
+  if(!activityId || !detail){ toast('Please choose a QC Activity and enter a detail.', 'err'); return false; }
+  const editingId = editingQcActivityDetailId;
+  const p = editingId
+    ? db.collection('qcActivityDetails').doc(editingId).update({ activityId, detail })
+    : db.collection('qcActivityDetails').add({ activityId, detail, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  p.then(() => { toast(editingId ? 'Saved.' : 'Added.', 'ok'); cancelQcActivityDetailEdit(); })
+   .catch(err => toast('Could not save: ' + err.message, 'err'));
+  return false;
+}
+function startQcActivityDetailEdit(id){
+  const d = qcActivityDetailsData.find(x => x.id === id);
+  if(!d) return;
+  editingQcActivityDetailId = id;
+  document.getElementById('qcActivityDetailActivity').value = d.activityId;
+  document.getElementById('qcActivityDetailText').value = d.detail;
+  document.getElementById('qcActivityDetailSubmitBtn').textContent = 'Update';
+  document.getElementById('qcActivityDetailCancelBtn').style.display = 'inline-flex';
+}
+function cancelQcActivityDetailEdit(){
+  editingQcActivityDetailId = null;
+  document.getElementById('qcActivityDetailForm').reset();
+  document.getElementById('qcActivityDetailSubmitBtn').textContent = 'Save';
+  document.getElementById('qcActivityDetailCancelBtn').style.display = 'none';
+}
+function deleteQcActivityDetail(id){
+  if(!confirm('Are you sure you want to delete this checklist detail?')) return;
+  db.collection('qcActivityDetails').doc(id).delete()
+    .then(() => toast('Removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+// --- QC Checklist Inspection ---
+(function wireQcInspDropzone(){
+  const dz = document.getElementById('qcInspDropzone');
+  const fi = document.getElementById('qcInspFiles');
+  if(!dz || !fi) return;
+  function addFiles(fileList){
+    Array.from(fileList).forEach(f => { if(qcInspFilesArr.length < 3) qcInspFilesArr.push(f); });
+    document.getElementById('qcInspFilePillWrap').innerHTML = qcInspFilesArr.map(f => `<div class="file-pill">${escapeHtml(f.name)}</div>`).join('');
+  }
+  fi.addEventListener('change', () => addFiles(fi.files));
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); if(e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  const dateInput = document.getElementById('qcInspDate');
+  if(dateInput) dateInput.value = new Date().toISOString().slice(0, 10);
+})();
+
+function handleQcInspectionSubmit(ev){
+  ev.preventDefault();
+  const activityId = document.getElementById('qcInspActivity').value;
+  const activity = qcActivitiesData.find(a => a.id === activityId);
+  const meta = {
+    project: document.getElementById('qcInspProject').value,
+    projectType: document.getElementById('qcInspProjectType').value.trim(),
+    unitNo: document.getElementById('qcInspUnitNo').value.trim(),
+    location: document.getElementById('qcInspLocation').value.trim(),
+    drawingDetails: document.getElementById('qcInspDrawingDetails').value.trim(),
+    contractorName: document.getElementById('qcInspContractor').value.trim(),
+    activityId, activityName: activity ? activity.name : '',
+    startDate: document.getElementById('qcInspDate').value
+  };
+  if(!meta.project || !meta.unitNo || !meta.location || !meta.drawingDetails || !meta.activityId){
+    toast('Please fill in all required fields.', 'err');
+    return false;
+  }
+  const btn = document.getElementById('qcInspSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const files = qcInspFilesArr.slice(0, 3);
+
+  const finish = (images) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('qcChecklistInspections').add({
+      ...meta, images, status: 'pending',
+      inspectedBy: currentUser.uid, inspectedByName: currentUser.name,
+      createdAt: now, updatedAt: now
+    }).then(() => {
+      toast('Inspection logged.', 'ok');
+      document.getElementById('qcInspForm').reset();
+      qcInspFilesArr = [];
+      document.getElementById('qcInspFilePillWrap').innerHTML = '';
+      document.getElementById('qcInspDate').value = new Date().toISOString().slice(0, 10);
+    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Save'; document.getElementById('qcInspProgressWrap').style.display = 'none'; });
+  };
+
+  function uploadNext(idx, images){
+    if(idx >= files.length) return finish(images);
+    const f = files[idx];
+    const path = `qcChecklistInspections/${Date.now()}_${idx}_${f.name}`;
+    document.getElementById('qcInspProgressWrap').style.display = 'block';
+    const task = storage.ref(path).put(f);
+    task.on('state_changed',
+      snap => { document.getElementById('qcInspProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Save'; },
+      () => task.snapshot.ref.getDownloadURL().then(url => uploadNext(idx + 1, [...images, url]))
+    );
+  }
+  if(files.length) uploadNext(0, []); else finish([]);
+  return false;
+}
+
+function renderQcInspTable(){
+  const body = document.getElementById('qcInspTableBody');
+  if(!body) return;
+  if(qcChecklistInspectionsData.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No inspections logged yet</b></div></td></tr>`;
+    return;
+  }
+  const statusMap = { pending: 'st-pending_review', approved: 'st-published', rejected: 'st-rejected' };
+  const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
+  body.innerHTML = qcChecklistInspectionsData.map(i => `
+    <tr>
+      <td>${escapeHtml(i.project || '—')}</td>
+      <td>${escapeHtml(i.unitNo || '—')} &middot; ${escapeHtml(i.location || '—')}</td>
+      <td>${escapeHtml(i.activityName || '—')}</td>
+      <td>${escapeHtml(i.startDate || '—')}</td>
+      <td>${escapeHtml(i.inspectedByName || '—')}</td>
+      <td><span class="badge ${statusMap[i.status] || ''}"><span class="dot"></span>${statusLabel[i.status] || i.status}</span></td>
+    </tr>`).join('');
+}
+
+// --- QC Checklist Approval ---
+function renderQcChecklistApprovalTable(){
+  const body = document.getElementById('qcChecklistApprovalTableBody');
+  const items = qcChecklistInspectionsData.filter(i => i.status === 'pending');
+  const badge = document.getElementById('qcChecklistApprovalBadge');
+  if(badge){ badge.textContent = items.length; badge.classList.toggle('hidden', items.length === 0); }
+  if(!body) return;
+  if(items.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Nothing awaiting approval</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = items.map(i => `
+    <tr>
+      <td>${escapeHtml(i.project || '—')}</td>
+      <td>${escapeHtml(i.unitNo || '—')} &middot; ${escapeHtml(i.location || '—')}</td>
+      <td>${escapeHtml(i.activityName || '—')}</td>
+      <td>${(i.images || []).map(url => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:40px; height:40px; object-fit:cover; border-radius:5px; margin-right:4px;"></a>`).join('') || '—'}</td>
+      <td>${escapeHtml(i.inspectedByName || '—')}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-teal btn-sm" onclick="approveQcChecklistInspection('${i.id}')">Approve</button>
+        <button class="btn btn-sm" style="background:var(--red); color:#fff;" onclick="openQcChecklistRejectModal('${i.id}')">Reject</button>
+      </td>
+    </tr>`).join('');
+}
+function approveQcChecklistInspection(id){
+  const now = firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('qcChecklistInspections').doc(id).update({
+    status: 'approved', approvedBy: currentUser.uid, approvedByName: currentUser.name, approvedAt: now, updatedAt: now
+  }).then(() => toast('Inspection approved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function openQcChecklistRejectModal(id){
+  activeQcChecklistInspectionId = id;
+  document.getElementById('qcChecklistRejectReason').value = '';
+  openModal('qcChecklistRejectModalOverlay');
+}
+function submitQcChecklistReject(){
+  const id = activeQcChecklistInspectionId;
+  const reason = document.getElementById('qcChecklistRejectReason').value.trim();
+  if(!reason){ toast('Please enter a reason.', 'err'); return; }
+  const now = firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('qcChecklistInspections').doc(id).update({
+    status: 'rejected', rejectReason: reason, rejectedBy: currentUser.uid, rejectedByName: currentUser.name, rejectedAt: now, updatedAt: now
+  }).then(() => { toast('Inspection rejected.', 'ok'); closeModal('qcChecklistRejectModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   MATERIAL TESTING
+   Materials is a plain MASTER_TYPES entry (reuses the generic CRUD).
+   Material Testing Details is a one-to-many list (Material -> its test
+   types, e.g. "Compressive Strength" for Solid Block) — same bespoke
+   inline-edit pattern as QC Checklist Details. Material Testing Log
+   entries record an actual test result with up to 3 photos; the Report
+   page filters the same data by project/material/date range.
+============================================================ */
+let materialTestDetailsData = [];
+let materialTestLogsData = [];
+let editingMaterialTestDetailId = null;
+let matLogFilesArr = [];
+
+function listenMaterialTestDetails(){
+  const unsub = db.collection('materialTestDetails').onSnapshot(snap => {
+    materialTestDetailsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin') renderMaterialTestDetailTable();
+    refreshMasterDataPanels(); // Material "in use" status depends on this data
+  }, err => console.error('materialTestDetails listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+function listenMaterialTestLogs(){
+  const unsub = db.collection('materialTestLogs').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    materialTestLogsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderMatLogTable();
+    renderMaterialTestReportTable();
+    refreshMasterDataPanels();
+  }, err => console.error('materialTestLogs listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+// Populates a Test Details <select> based on whichever Material is chosen
+// in a paired <select> — used by the Material Testing log form.
+function populateMaterialTestDetailSelectFor(materialSelectId, detailSelectId){
+  const materialId = document.getElementById(materialSelectId).value;
+  const sel = document.getElementById(detailSelectId);
+  if(!sel) return;
+  const matching = materialTestDetailsData.filter(d => d.materialId === materialId);
+  sel.innerHTML = matching.length
+    ? '<option value="">Select&hellip;</option>' + matching.map(d => `<option value="${d.id}">${escapeHtml(d.testDetail)}</option>`).join('')
+    : '<option value="">No test details set up for this material</option>';
+}
+
+// --- Material Testing Details (admin) ---
+function renderMaterialTestDetailTable(){
+  const body = document.getElementById('materialTestDetailTableBody');
+  if(!body) return;
+  if(materialTestDetailsData.length === 0){
+    body.innerHTML = `<tr><td colspan="3"><div class="empty-state"><b>No test details yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = materialTestDetailsData.map(d => {
+    const material = mastersData.materialMasters.find(m => m.id === d.materialId);
+    return `<tr>
+      <td>${escapeHtml(material ? material.name : '—')}</td>
+      <td>${escapeHtml(d.testDetail)}</td>
+      <td style="text-align:right;">
+        <button class="icon-btn-sm" onclick="startMaterialTestDetailEdit('${d.id}')" title="Edit">&#9999;&#65039;</button>
+        <button class="icon-btn-sm" onclick="deleteMaterialTestDetail('${d.id}')" title="Delete">&#128465;&#65039;</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function submitMaterialTestDetail(ev){
+  ev.preventDefault();
+  const materialId = document.getElementById('materialTestDetailMaterial').value;
+  const testDetail = document.getElementById('materialTestDetailText').value.trim();
+  if(!materialId || !testDetail){ toast('Please choose a material and enter a test detail.', 'err'); return false; }
+  const editingId = editingMaterialTestDetailId;
+  const p = editingId
+    ? db.collection('materialTestDetails').doc(editingId).update({ materialId, testDetail })
+    : db.collection('materialTestDetails').add({ materialId, testDetail, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+  p.then(() => { toast(editingId ? 'Saved.' : 'Added.', 'ok'); cancelMaterialTestDetailEdit(); })
+   .catch(err => toast('Could not save: ' + err.message, 'err'));
+  return false;
+}
+function startMaterialTestDetailEdit(id){
+  const d = materialTestDetailsData.find(x => x.id === id);
+  if(!d) return;
+  editingMaterialTestDetailId = id;
+  document.getElementById('materialTestDetailMaterial').value = d.materialId;
+  document.getElementById('materialTestDetailText').value = d.testDetail;
+  document.getElementById('materialTestDetailSubmitBtn').textContent = 'Update';
+  document.getElementById('materialTestDetailCancelBtn').style.display = 'inline-flex';
+}
+function cancelMaterialTestDetailEdit(){
+  editingMaterialTestDetailId = null;
+  document.getElementById('materialTestDetailForm').reset();
+  document.getElementById('materialTestDetailSubmitBtn').textContent = 'Save';
+  document.getElementById('materialTestDetailCancelBtn').style.display = 'none';
+}
+function deleteMaterialTestDetail(id){
+  if(!confirm('Are you sure you want to delete this test detail?')) return;
+  db.collection('materialTestDetails').doc(id).delete()
+    .then(() => toast('Removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+// --- Material Testing Log ---
+(function wireMatLogDropzone(){
+  const dz = document.getElementById('matLogDropzone');
+  const fi = document.getElementById('matLogFiles');
+  if(!dz || !fi) return;
+  function addFiles(fileList){
+    Array.from(fileList).forEach(f => { if(matLogFilesArr.length < 3) matLogFilesArr.push(f); });
+    document.getElementById('matLogFilePillWrap').innerHTML = matLogFilesArr.map(f => `<div class="file-pill">${escapeHtml(f.name)}</div>`).join('');
+  }
+  fi.addEventListener('change', () => addFiles(fi.files));
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); if(e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+})();
+
+function handleMaterialTestLogSubmit(ev){
+  ev.preventDefault();
+  const materialId = document.getElementById('matLogMaterial').value;
+  const testDetailId = document.getElementById('matLogTestDetail').value;
+  const material = mastersData.materialMasters.find(m => m.id === materialId);
+  const testDetail = materialTestDetailsData.find(d => d.id === testDetailId);
+  const meta = {
+    project: document.getElementById('matLogProject').value,
+    location: document.getElementById('matLogLocation').value.trim(),
+    materialId, materialName: material ? material.name : '',
+    testDetailId, testDetailName: testDetail ? testDetail.testDetail : '',
+    remarks: document.getElementById('matLogRemarks').value.trim()
+  };
+  if(!meta.project || !meta.materialId || !meta.testDetailId){
+    toast('Please fill in all required fields.', 'err');
+    return false;
+  }
+  const btn = document.getElementById('matLogSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const files = matLogFilesArr.slice(0, 3);
+
+  const finish = (images) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('materialTestLogs').add({
+      ...meta, images,
+      createdBy: currentUser.uid, createdByName: currentUser.name,
+      createdAt: now, updatedAt: now
+    }).then(() => {
+      toast('Test result logged.', 'ok');
+      document.getElementById('matLogForm').reset();
+      matLogFilesArr = [];
+      document.getElementById('matLogFilePillWrap').innerHTML = '';
+      document.getElementById('matLogTestDetail').innerHTML = '<option value="">Select material first&hellip;</option>';
+    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Save'; document.getElementById('matLogProgressWrap').style.display = 'none'; });
+  };
+
+  function uploadNext(idx, images){
+    if(idx >= files.length) return finish(images);
+    const f = files[idx];
+    const path = `materialTestLogs/${Date.now()}_${idx}_${f.name}`;
+    document.getElementById('matLogProgressWrap').style.display = 'block';
+    const task = storage.ref(path).put(f);
+    task.on('state_changed',
+      snap => { document.getElementById('matLogProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Save'; },
+      () => task.snapshot.ref.getDownloadURL().then(url => uploadNext(idx + 1, [...images, url]))
+    );
+  }
+  if(files.length) uploadNext(0, []); else finish([]);
+  return false;
+}
+
+function renderMatLogTable(){
+  const body = document.getElementById('matLogTableBody');
+  if(!body) return;
+  if(materialTestLogsData.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No test results logged yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = materialTestLogsData.map(l => `
+    <tr>
+      <td>${escapeHtml(l.project || '—')}</td>
+      <td>${escapeHtml(l.location || '—')}</td>
+      <td>${timeAgo(l.createdAt)}</td>
+      <td>${escapeHtml(l.materialName || '—')}</td>
+      <td>${escapeHtml(l.testDetailName || '—')}</td>
+      <td>${escapeHtml(l.remarks || '—')}</td>
+    </tr>`).join('');
+}
+
+// --- Material Testing Report ---
+function renderMaterialTestReportTable(){
+  const body = document.getElementById('matRptTableBody');
+  if(!body) return;
+  const project = document.getElementById('matRptProject') ? document.getElementById('matRptProject').value : '';
+  const materialId = document.getElementById('matRptMaterial') ? document.getElementById('matRptMaterial').value : '';
+  const fromDate = document.getElementById('matRptFrom') ? document.getElementById('matRptFrom').value : '';
+  const toDate = document.getElementById('matRptTo') ? document.getElementById('matRptTo').value : '';
+
+  const filtered = materialTestLogsData.filter(l => {
+    if(project && l.project !== project) return false;
+    if(materialId && l.materialId !== materialId) return false;
+    if((fromDate || toDate) && l.createdAt && l.createdAt.toMillis){
+      const ms = l.createdAt.toMillis();
+      if(fromDate && ms < new Date(fromDate).getTime()) return false;
+      if(toDate && ms > new Date(toDate).getTime() + 86400000) return false;
+    }
+    return true;
+  });
+
+  if(filtered.length === 0){
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>No results match these filters</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(l => `
+    <tr>
+      <td>${escapeHtml(l.project || '—')}</td>
+      <td>${escapeHtml(l.location || '—')}</td>
+      <td>${timeAgo(l.createdAt)}</td>
+      <td>${escapeHtml(l.materialName || '—')}</td>
+      <td>${escapeHtml(l.testDetailName || '—')}</td>
+      <td>${escapeHtml(l.remarks || '—')}</td>
+      <td>${escapeHtml(l.createdByName || '—')}</td>
+    </tr>`).join('');
+}
+function clearMaterialTestReportFilters(){
+  ['matRptProject','matRptMaterial'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  ['matRptFrom','matRptTo'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  renderMaterialTestReportTable();
+}
+
+/* ============================================================
+   FINAL SNAG POINT
+   A simpler model than QC Observation: rather than separate Rectify/
+   Recheck/PH-Approval pages, Rectified and QC Approved are two flags
+   toggled directly on the record via its Edit modal — the reference
+   report's "Rectified"/"QC Approval" count columns are the only signal
+   of a multi-stage flow, and no separate action screens were shown for
+   it, so this collapses cleanly rather than inventing pages unseen.
+   Site Engineer / Project Manager are plain selects over all users
+   (not filtered by role) to keep this independent of exact role naming.
+============================================================ */
+let finalSnagPointsData = [];
+let snagFile = null;
+let activeSnagId = null;
+
+function listenFinalSnagPoints(){
+  const unsub = db.collection('finalSnagPoints').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    finalSnagPointsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderSnagTable();
+    renderSnagReportTable();
+  }, err => console.error('finalSnagPoints listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function populateSnagUserSelects(){
+  const optionsHtml = '<option value="">Select&hellip;</option>' +
+    usersData.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+  ['snagSiteEngineer', 'snagProjectManager', 'editSnagSiteEngineer', 'editSnagProjectManager'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    if(!sel) return;
+    const prevValue = sel.value;
+    sel.innerHTML = optionsHtml;
+    if(usersData.some(u => u.id === prevValue)) sel.value = prevValue;
+  });
+}
+
+// --- Log Snag form ---
+(function wireSnagDropzone(){
+  const dz = document.getElementById('snagDropzone');
+  const fi = document.getElementById('snagFile');
+  if(!dz || !fi) return;
+  fi.addEventListener('change', () => {
+    snagFile = fi.files[0] || null;
+    document.getElementById('snagFilePillWrap').innerHTML = snagFile ? `<div class="file-pill">${escapeHtml(snagFile.name)}</div>` : '';
+  });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag');
+    if(e.dataTransfer.files[0]){ fi.files = e.dataTransfer.files; snagFile = e.dataTransfer.files[0]; document.getElementById('snagFilePillWrap').innerHTML = `<div class="file-pill">${escapeHtml(snagFile.name)}</div>`; }
+  });
+})();
+
+function handleSnagSubmit(ev){
+  ev.preventDefault();
+  const siteEngineerUid = document.getElementById('snagSiteEngineer').value;
+  const projectManagerUid = document.getElementById('snagProjectManager').value;
+  const siteEngineerUser = usersData.find(u => u.id === siteEngineerUid);
+  const projectManagerUser = usersData.find(u => u.id === projectManagerUid);
+  const meta = {
+    project: document.getElementById('snagProject').value,
+    flat: document.getElementById('snagFlat').value.trim(),
+    siteEngineerUid, siteEngineerName: siteEngineerUser ? siteEngineerUser.name : '',
+    projectManagerUid, projectManagerName: projectManagerUser ? projectManagerUser.name : '',
+    snagPoint: document.getElementById('snagText').value.trim()
+  };
+  if(!meta.project || !meta.flat || !meta.snagPoint){
+    toast('Please fill in all required fields.', 'err');
+    return false;
+  }
+  const btn = document.getElementById('snagSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  const finish = (fileURL) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('finalSnagPoints').add({
+      ...meta, fileURL: fileURL || null, rectified: false, qcApproved: false,
+      createdBy: currentUser.uid, createdByName: currentUser.name,
+      createdAt: now, updatedAt: now
+    }).then(() => {
+      toast('Snag point added.', 'ok');
+      document.getElementById('snagForm').reset();
+      snagFile = null;
+      document.getElementById('snagFilePillWrap').innerHTML = '';
+    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Add'; document.getElementById('snagProgressWrap').style.display = 'none'; });
+  };
+
+  if(snagFile){
+    const path = `finalSnagPoints/${Date.now()}_${snagFile.name}`;
+    const task = storage.ref(path).put(snagFile);
+    document.getElementById('snagProgressWrap').style.display = 'block';
+    task.on('state_changed',
+      snap => { document.getElementById('snagProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Add'; },
+      () => task.snapshot.ref.getDownloadURL().then(finish)
+    );
+  } else {
+    finish(null);
+  }
+  return false;
+}
+
+function snagStatusBadge(s){
+  if(s.qcApproved) return `<span class="badge st-published"><span class="dot"></span>QC Approved</span>`;
+  if(s.rectified) return `<span class="badge st-approved"><span class="dot"></span>Rectified</span>`;
+  return `<span class="badge st-pending_review"><span class="dot"></span>Open</span>`;
+}
+
+function renderSnagTable(){
+  const body = document.getElementById('snagTableBody');
+  if(!body) return;
+  if(finalSnagPointsData.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No snag points logged yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = finalSnagPointsData.map(s => `
+    <tr onclick="openEditSnagModal('${s.id}')">
+      <td>${escapeHtml(s.project || '—')}</td>
+      <td>${escapeHtml(s.flat || '—')}</td>
+      <td>${escapeHtml(s.siteEngineerName || '—')}</td>
+      <td>${escapeHtml(s.projectManagerName || '—')}</td>
+      <td>${snagStatusBadge(s)}</td>
+      <td style="text-align:right;"><button class="icon-btn-sm" onclick="event.stopPropagation(); openEditSnagModal('${s.id}')" title="Open">&#9999;&#65039;</button></td>
+    </tr>`).join('');
+}
+
+function openEditSnagModal(id){
+  const s = finalSnagPointsData.find(x => x.id === id);
+  if(!s) return;
+  activeSnagId = id;
+  populateSnagUserSelects();
+  document.getElementById('editSnagProject').value = s.project || '';
+  document.getElementById('editSnagFlat').value = s.flat || '';
+  document.getElementById('editSnagSiteEngineer').value = s.siteEngineerUid || '';
+  document.getElementById('editSnagProjectManager').value = s.projectManagerUid || '';
+  document.getElementById('editSnagText').value = s.snagPoint || '';
+  document.getElementById('editSnagRectified').checked = !!s.rectified;
+  document.getElementById('editSnagQcApproved').checked = !!s.qcApproved;
+  document.getElementById('editSnagFileFieldWrap').innerHTML = s.fileURL
+    ? `<label>Attachment</label><a href="${s.fileURL}" target="_blank" rel="noopener">View attached file</a>`
+    : '';
+  openModal('editSnagModalOverlay');
+}
+function submitEditSnag(){
+  const id = activeSnagId;
+  const siteEngineerUid = document.getElementById('editSnagSiteEngineer').value;
+  const projectManagerUid = document.getElementById('editSnagProjectManager').value;
+  const siteEngineerUser = usersData.find(u => u.id === siteEngineerUid);
+  const projectManagerUser = usersData.find(u => u.id === projectManagerUid);
+  const updates = {
+    project: document.getElementById('editSnagProject').value,
+    flat: document.getElementById('editSnagFlat').value.trim(),
+    siteEngineerUid, siteEngineerName: siteEngineerUser ? siteEngineerUser.name : '',
+    projectManagerUid, projectManagerName: projectManagerUser ? projectManagerUser.name : '',
+    snagPoint: document.getElementById('editSnagText').value.trim(),
+    rectified: document.getElementById('editSnagRectified').checked,
+    qcApproved: document.getElementById('editSnagQcApproved').checked,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(!updates.project || !updates.flat || !updates.snagPoint){ toast('Please fill in all required fields.', 'err'); return; }
+  db.collection('finalSnagPoints').doc(id).update(updates)
+    .then(() => { toast('Saved.', 'ok'); closeModal('editSnagModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function deleteSnag(){
+  const id = activeSnagId;
+  const s = finalSnagPointsData.find(x => x.id === id);
+  if(!confirm(`Are you sure you want to delete this snag point?\n\n"${s ? s.snagPoint : ''}"`)) return;
+  db.collection('finalSnagPoints').doc(id).delete()
+    .then(() => { toast('Removed.', 'ok'); closeModal('editSnagModalOverlay'); })
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+// --- Final Snag Point Report ---
+function renderSnagReportTable(){
+  const body = document.getElementById('snagRptTableBody');
+  if(!body) return;
+  const projectFilter = document.getElementById('snagRptProject') ? document.getElementById('snagRptProject').value : '';
+  const filtered = projectFilter ? finalSnagPointsData.filter(s => s.project === projectFilter) : finalSnagPointsData;
+  if(filtered.length === 0){
+    body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><b>No snag points match these filters</b></div></td></tr>`;
+    return;
+  }
+  const byProject = {};
+  filtered.forEach(s => {
+    const key = s.project || '—';
+    if(!byProject[key]) byProject[key] = { total: 0, rectified: 0, qcApproved: 0 };
+    byProject[key].total++;
+    if(s.rectified) byProject[key].rectified++;
+    if(s.qcApproved) byProject[key].qcApproved++;
+  });
+  body.innerHTML = Object.keys(byProject).sort().map(p => `
+    <tr>
+      <td>${escapeHtml(p)}</td>
+      <td>${byProject[p].total}</td>
+      <td>${byProject[p].rectified}</td>
+      <td>${byProject[p].qcApproved}</td>
+    </tr>`).join('');
+}
+function clearSnagReportFilters(){
+  const el = document.getElementById('snagRptProject');
+  if(el) el.value = '';
+  renderSnagReportTable();
+}
+
 function startListeners(){
   stopSessionListeners(); // safety: clear anything left over before attaching fresh ones
   populateStatusFilterOptions(); // seed with current STATUS_LABELS immediately, live listener refines it
@@ -1457,7 +2506,14 @@ function startListeners(){
   listenWorkflowConfigs();
   listenStatusLabels();
   listenRoleMasters();
-  if(currentUser.role === 'admin') listenUsers();
+  listenQcObservations();
+  listenQcActivities();
+  listenQcActivityDetails();
+  listenQcChecklistInspections();
+  listenMaterialTestDetails();
+  listenMaterialTestLogs();
+  listenFinalSnagPoints();
+  listenUsers(); // needed by everyone now, not just admins — populates Site Engineer/Project Manager selects for Final Snag Point
   refreshMasterDataPanels(); // in case this admin's panels were open before this fired
 }
 
@@ -1475,6 +2531,24 @@ function stopSessionListeners(){
   activeWorkflowCategory = null;
   customStatusesData = [];
   editingCustomStatusId = null;
+  qcObservationsData = [];
+  qcObsFile = null;
+  qcRectifyFile = null;
+  activeQcObservationId = null;
+  qcActivitiesData = [];
+  qcActivityDetailsData = [];
+  qcChecklistInspectionsData = [];
+  editingQcActivityId = null;
+  editingQcActivityDetailId = null;
+  qcInspFilesArr = [];
+  activeQcChecklistInspectionId = null;
+  materialTestDetailsData = [];
+  materialTestLogsData = [];
+  editingMaterialTestDetailId = null;
+  matLogFilesArr = [];
+  finalSnagPointsData = [];
+  snagFile = null;
+  activeSnagId = null;
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
