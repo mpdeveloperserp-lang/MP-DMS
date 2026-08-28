@@ -411,12 +411,28 @@
     <button class="nav-item active" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
     <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
+    <div class="nav-group-label">Quality Control</div>
+    <button class="nav-item" data-view="qcObservationView" onclick="switchView('qcObservationView')"><span class="ic">&#128269;</span> QC Observation</button>
+    <button class="nav-item" data-view="qcRectifyView" onclick="switchView('qcRectifyView')"><span class="ic">&#128295;</span> QC Rectify<span class="nav-badge hidden" id="qcRectifyBadge">0</span></button>
+    <button class="nav-item" data-view="qcRecheckView" onclick="switchView('qcRecheckView')"><span class="ic">&#128270;</span> QC Recheck<span class="nav-badge hidden" id="qcRecheckBadge">0</span></button>
+    <button class="nav-item" data-view="qcPhApprovalView" onclick="switchView('qcPhApprovalView')"><span class="ic">&#9989;</span> QC PH Approval<span class="nav-badge hidden" id="qcPhApprovalBadge">0</span></button>
+    <button class="nav-item" data-view="qcChecklistInspectionView" onclick="switchView('qcChecklistInspectionView')"><span class="ic">&#128203;</span> QC Checklist Inspection</button>
+    <button class="nav-item" data-view="qcChecklistApprovalView" onclick="switchView('qcChecklistApprovalView')"><span class="ic">&#9989;</span> QC Checklist Approval<span class="nav-badge hidden" id="qcChecklistApprovalBadge">0</span></button>
+    <button class="nav-item" data-view="materialTestLogView" onclick="switchView('materialTestLogView')"><span class="ic">&#129521;</span> Material Testing</button>
+    <button class="nav-item" data-view="materialTestReportView" onclick="switchView('materialTestReportView')"><span class="ic">&#128202;</span> Material Testing Report</button>
+    <button class="nav-item" data-view="finalSnagPointView" onclick="switchView('finalSnagPointView')"><span class="ic">&#128204;</span> Final Snag Point</button>
+    <button class="nav-item" data-view="finalSnagPointReportView" onclick="switchView('finalSnagPointReportView')"><span class="ic">&#128202;</span> Final Snag Point Report</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
     <button class="nav-item hidden" id="adminUsersNavBtn" data-view="usersView" onclick="switchView('usersView')"><span class="ic">&#128101;</span> Manage Users</button>
     <div class="nav-group-label hidden" id="adminMasterDataGroup" style="margin-top:10px;">Master Data</div>
     <button class="nav-item hidden admin-master-nav" data-view="projectsMasterView" onclick="switchView('projectsMasterView')"><span class="ic">&#127959;</span> Manage Projects</button>
     <button class="nav-item hidden admin-master-nav" data-view="departmentsMasterView" onclick="switchView('departmentsMasterView')"><span class="ic">&#127970;</span> Manage Departments</button>
     <button class="nav-item hidden admin-master-nav" data-view="categoriesMasterView" onclick="switchView('categoriesMasterView')"><span class="ic">&#128193;</span> Manage Document Categories</button>
+    <button class="nav-item hidden admin-master-nav" data-view="qcCategoriesMasterView" onclick="switchView('qcCategoriesMasterView')"><span class="ic">&#9989;</span> Manage QC Categories</button>
+    <button class="nav-item hidden admin-master-nav" data-view="qcActivitiesView" onclick="switchView('qcActivitiesView')"><span class="ic">&#128203;</span> Manage QC Activities</button>
+    <button class="nav-item hidden admin-master-nav" data-view="qcActivityDetailsView" onclick="switchView('qcActivityDetailsView')"><span class="ic">&#128203;</span> QC Checklist Details</button>
+    <button class="nav-item hidden admin-master-nav" data-view="materialsMasterView" onclick="switchView('materialsMasterView')"><span class="ic">&#129521;</span> Manage Materials</button>
+    <button class="nav-item hidden admin-master-nav" data-view="materialTestDetailsView" onclick="switchView('materialTestDetailsView')"><span class="ic">&#129521;</span> Material Testing Details</button>
     <button class="nav-item hidden admin-master-nav" data-view="rolesMasterView" onclick="switchView('rolesMasterView')"><span class="ic">&#128737;</span> Manage Roles</button>
     <div class="nav-group-label hidden" id="adminConfigGroup" style="margin-top:10px;">Configuration</div>
     <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
@@ -502,6 +518,265 @@
       </div>
     </div>
 
+    <!-- ---------------- QC OBSERVATION VIEW ---------------- -->
+    <div class="view" id="qcObservationView">
+      <div class="view-head"><h2>QC Observation</h2></div>
+      <div class="view-sub">Log a site quality observation with severity, category, and a photo. Logged observations move through Rectify &rarr; Recheck &rarr; PH Approval.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="qcObsForm" onsubmit="return handleQcObservationSubmit(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Project</label>
+              <select id="qcObsProject" required><option value="">Select project&hellip;</option></select>
+            </div>
+            <div class="field"><label>Inspection Date</label><input type="date" id="qcObsDate" required></div>
+            <div class="field"><label>Flat / Unit</label><input type="text" id="qcObsFlat" placeholder="e.g. F2"></div>
+            <div class="field"><label>Stage / Location</label><input type="text" id="qcObsLocation" placeholder="e.g. Common Area" required></div>
+            <div class="field"><label>QC Category</label>
+              <select id="qcObsCategory" required><option value="">Select category&hellip;</option></select>
+            </div>
+            <div class="field"><label>Severity</label>
+              <select id="qcObsSeverity" required>
+                <option value="">Select&hellip;</option>
+                <option value="minor">Minor</option>
+                <option value="major">Major</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+            <div class="field full"><label>Observation</label><textarea id="qcObsText" rows="3" required placeholder="Describe the defect or observation&hellip;"></textarea></div>
+            <div class="field full">
+              <label>Attachment</label>
+              <label class="dropzone" id="qcObsDropzone" for="qcObsFile">
+                <div id="qcObsDzText"><strong>Click to choose a photo</strong> or drag and drop</div>
+                <div id="qcObsFilePillWrap"></div>
+              </label>
+              <input type="file" id="qcObsFile" class="hidden" accept="image/*">
+            </div>
+            <div class="progress-wrap" id="qcObsProgressWrap"><div class="progress-bar" id="qcObsProgressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="qcObsSubmitBtn">Add Observation</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Category</th><th>Severity</th><th>Observation</th><th>Status</th><th>Logged</th></tr></thead>
+          <tbody id="qcObsTableBody"><tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC RECTIFY VIEW ---------------- -->
+    <div class="view" id="qcRectifyView">
+      <div class="view-head"><h2>QC Rectify</h2></div>
+      <div class="view-sub">Open observations awaiting rectification. Mark one done once the defect is fixed on site.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Category</th><th>Severity</th><th>Observation</th><th>Logged</th><th></th></tr></thead>
+          <tbody id="qcRectifyTableBody"><tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC RECHECK VIEW ---------------- -->
+    <div class="view" id="qcRecheckView">
+      <div class="view-head"><h2>QC Recheck</h2></div>
+      <div class="view-sub">Rectified observations awaiting a QC recheck. Review the before/after photos, then confirm.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Observation</th><th>Before</th><th>Rectified By</th><th>After</th><th></th></tr></thead>
+          <tbody id="qcRecheckTableBody"><tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC PH APPROVAL VIEW ---------------- -->
+    <div class="view" id="qcPhApprovalView">
+      <div class="view-head"><h2>QC PH Approval</h2></div>
+      <div class="view-sub">Rechecked observations awaiting final Project Head approval or rejection.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Observation</th><th>Review</th><th>Recheck Remarks</th><th></th></tr></thead>
+          <tbody id="qcPhApprovalTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC CHECKLIST INSPECTION VIEW ---------------- -->
+    <div class="view" id="qcChecklistInspectionView">
+      <div class="view-head"><h2>QC Checklist Inspection</h2></div>
+      <div class="view-sub">Log an inspection performed against one of the checklist templates in Manage QC Activities.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="qcInspForm" onsubmit="return handleQcInspectionSubmit(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Project</label>
+              <select id="qcInspProject" required><option value="">Select project&hellip;</option></select>
+            </div>
+            <div class="field"><label>Project Type</label><input type="text" id="qcInspProjectType" placeholder="e.g. Apartment"></div>
+            <div class="field"><label>Unit No.</label><input type="text" id="qcInspUnitNo" placeholder="e.g. 402" required></div>
+            <div class="field"><label>Location</label><input type="text" id="qcInspLocation" placeholder="e.g. Common Area" required></div>
+            <div class="field"><label>Drawing Details</label><input type="text" id="qcInspDrawingDetails" placeholder="e.g. Grid 1 - 14" required></div>
+            <div class="field"><label>Contractor Name</label><input type="text" id="qcInspContractor"></div>
+            <div class="field"><label>QC Activity</label>
+              <select id="qcInspActivity" required><option value="">Select&hellip;</option></select>
+            </div>
+            <div class="field"><label>Start Date</label><input type="date" id="qcInspDate" required></div>
+            <div class="field full">
+              <label>Photos (up to 3)</label>
+              <label class="dropzone" id="qcInspDropzone" for="qcInspFiles">
+                <div id="qcInspDzText"><strong>Click to choose photos</strong> or drag and drop</div>
+                <div id="qcInspFilePillWrap"></div>
+              </label>
+              <input type="file" id="qcInspFiles" class="hidden" accept="image/*" multiple>
+            </div>
+            <div class="progress-wrap" id="qcInspProgressWrap"><div class="progress-bar" id="qcInspProgressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="qcInspSubmitBtn">Save</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Unit / Location</th><th>QC Activity</th><th>Start Date</th><th>Inspected By</th><th>Status</th></tr></thead>
+          <tbody id="qcInspTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC CHECKLIST APPROVAL VIEW ---------------- -->
+    <div class="view" id="qcChecklistApprovalView">
+      <div class="view-head"><h2>QC Checklist Approval</h2></div>
+      <div class="view-sub">Inspections awaiting approval or rejection.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Unit / Location</th><th>QC Activity</th><th>Photos</th><th>Inspected By</th><th></th></tr></thead>
+          <tbody id="qcChecklistApprovalTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- MATERIAL TESTING LOG VIEW ---------------- -->
+    <div class="view" id="materialTestLogView">
+      <div class="view-head"><h2>Material Testing</h2></div>
+      <div class="view-sub">Log a material test result with supporting photos.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="matLogForm" onsubmit="return handleMaterialTestLogSubmit(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Project</label>
+              <select id="matLogProject" required><option value="">Select project&hellip;</option></select>
+            </div>
+            <div class="field"><label>Location</label><input type="text" id="matLogLocation" placeholder="e.g. East Center"></div>
+            <div class="field"><label>Material</label>
+              <select id="matLogMaterial" required onchange="populateMaterialTestDetailSelectFor('matLogMaterial','matLogTestDetail')"><option value="">Select material&hellip;</option></select>
+            </div>
+            <div class="field"><label>Test Details</label>
+              <select id="matLogTestDetail" required><option value="">Select material first&hellip;</option></select>
+            </div>
+            <div class="field full"><label>Remarks</label><input type="text" id="matLogRemarks" placeholder="Optional&hellip;"></div>
+            <div class="field full">
+              <label>Photos (up to 3)</label>
+              <label class="dropzone" id="matLogDropzone" for="matLogFiles">
+                <div id="matLogDzText"><strong>Click to choose photos</strong> or drag and drop</div>
+                <div id="matLogFilePillWrap"></div>
+              </label>
+              <input type="file" id="matLogFiles" class="hidden" accept="image/*" multiple>
+            </div>
+            <div class="progress-wrap" id="matLogProgressWrap"><div class="progress-bar" id="matLogProgressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="matLogSubmitBtn">Save</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Date</th><th>Material</th><th>Test Details</th><th>Remarks</th></tr></thead>
+          <tbody id="matLogTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- MATERIAL TESTING REPORT VIEW ---------------- -->
+    <div class="view" id="materialTestReportView">
+      <div class="view-head"><h2>Material Testing Report</h2></div>
+      <div class="view-sub">Filterable view of every logged material test.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <div class="doc-filter-row">
+          <div class="field" style="margin-bottom:0;"><label>Project</label><select id="matRptProject" onchange="renderMaterialTestReportTable()"><option value="">All projects</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>Material</label><select id="matRptMaterial" onchange="renderMaterialTestReportTable()"><option value="">All materials</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>From</label><input type="date" id="matRptFrom" onchange="renderMaterialTestReportTable()"></div>
+          <div class="field" style="margin-bottom:0;"><label>To</label><input type="date" id="matRptTo" onchange="renderMaterialTestReportTable()"></div>
+          <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearMaterialTestReportFilters()">Clear filters</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Date</th><th>Material</th><th>Test Details</th><th>Remarks</th><th>Created By</th></tr></thead>
+          <tbody id="matRptTableBody"><tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- FINAL SNAG POINT VIEW ---------------- -->
+    <div class="view" id="finalSnagPointView">
+      <div class="view-head"><h2>Final Snag Point</h2></div>
+      <div class="view-sub">Log a handover snag and track it through to rectification and QC approval.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="snagForm" onsubmit="return handleSnagSubmit(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Project</label>
+              <select id="snagProject" required><option value="">Select project&hellip;</option></select>
+            </div>
+            <div class="field"><label>Flat</label><input type="text" id="snagFlat" placeholder="e.g. F1" required></div>
+            <div class="field"><label>Site Engineer</label>
+              <select id="snagSiteEngineer"><option value="">Select&hellip;</option></select>
+            </div>
+            <div class="field"><label>Project Manager</label>
+              <select id="snagProjectManager"><option value="">Select&hellip;</option></select>
+            </div>
+            <div class="field full"><label>Snag Point</label><textarea id="snagText" rows="2" required placeholder="Describe the snag&hellip;"></textarea></div>
+            <div class="field full">
+              <label>Attachment</label>
+              <label class="dropzone" id="snagDropzone" for="snagFile">
+                <div id="snagDzText"><strong>Click to choose a file</strong> or drag and drop</div>
+                <div id="snagFilePillWrap"></div>
+              </label>
+              <input type="file" id="snagFile" class="hidden">
+            </div>
+            <div class="progress-wrap" id="snagProgressWrap"><div class="progress-bar" id="snagProgressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="snagSubmitBtn">Add</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Flat</th><th>Site Engineer</th><th>Project Manager</th><th>Status</th><th></th></tr></thead>
+          <tbody id="snagTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- FINAL SNAG POINT REPORT VIEW ---------------- -->
+    <div class="view" id="finalSnagPointReportView">
+      <div class="view-head"><h2>Final Snag Point Report</h2></div>
+      <div class="view-sub">Snag counts by project.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <div class="doc-filter-row">
+          <div class="field" style="margin-bottom:0;"><label>Project</label><select id="snagRptProject" onchange="renderSnagReportTable()"><option value="">All projects</option></select></div>
+          <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearSnagReportFilters()">Clear filters</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Total</th><th>Rectified</th><th>QC Approval</th></tr></thead>
+          <tbody id="snagRptTableBody"><tr><td colspan="4"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ---------------- MANAGE USERS VIEW (admin only) ---------------- -->
     <div class="view" id="usersView">
       <div class="view-head"><h2>Manage Users</h2><button class="btn btn-teal" onclick="openCreateUserModal()">+ Create User</button></div>
@@ -535,6 +810,101 @@
       <div class="view-head"><h2>Manage Document Categories</h2><button class="btn btn-teal" onclick="openCreateMasterModal('categoryMasters')">+ Create Document Category</button></div>
       <div class="view-sub">Feeds the Document Category dropdown on Upload and the Documents filter. Click an entry to expand and add sub-items (e.g. document types) under it. Entries in use can't be edited or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="categoriesMasterPanel"></div>
+    </div>
+
+    <!-- ---------------- MANAGE QC CATEGORIES VIEW (admin only) ---------------- -->
+    <div class="view" id="qcCategoriesMasterView">
+      <div class="view-head"><h2>Manage QC Categories</h2><button class="btn btn-teal" onclick="openCreateMasterModal('qcCategoryMasters')">+ Create QC Category</button></div>
+      <div class="view-sub">Feeds the QC Category dropdown when logging a QC Observation. Entries in use can't be edited or deleted.</div>
+      <div class="card panel" style="max-width:640px;" id="qcCategoriesMasterPanel"></div>
+    </div>
+
+    <!-- ---------------- MANAGE QC ACTIVITIES VIEW (admin only) ---------------- -->
+    <div class="view" id="qcActivitiesView">
+      <div class="view-head"><h2>Manage QC Activities</h2></div>
+      <div class="view-sub">Checklist templates used when logging a QC Checklist Inspection. Add the checklist's individual check items under QC Checklist Details.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="qcActivityForm" onsubmit="return submitQcActivity(event)">
+          <div class="upload-grid">
+            <div class="field full"><label>QC Activity Name</label><input type="text" id="qcActivityName" placeholder="e.g. CHECK LIST FOR GRID MARKING" required></div>
+            <div class="field"><label>Category</label><input type="text" id="qcActivityCategory" value="New"></div>
+            <div class="field"><label>TAT (days)</label><input type="number" id="qcActivityTat" min="0"></div>
+            <div class="field"><label>Checklist No.</label><input type="text" id="qcActivityChecklistNo"></div>
+            <div class="field" style="display:flex; align-items:center; gap:8px; margin-top:22px;">
+              <input type="checkbox" id="qcActivityMep" style="width:auto;"> <label for="qcActivityMep" style="margin:0;">MEP</label>
+            </div>
+            <div class="full" style="display:flex; gap:10px;">
+              <button class="btn btn-teal" type="submit" id="qcActivitySubmitBtn">Save</button>
+              <button class="btn btn-ghost" type="button" id="qcActivityCancelBtn" style="display:none;" onclick="cancelQcActivityEdit()">Cancel</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Category</th><th>TAT</th><th>Checklist No.</th><th>MEP</th><th></th></tr></thead>
+          <tbody id="qcActivityTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- QC CHECKLIST DETAILS VIEW (admin only) ---------------- -->
+    <div class="view" id="qcActivityDetailsView">
+      <div class="view-head"><h2>QC Checklist Details</h2></div>
+      <div class="view-sub">The individual check items that make up a QC Activity's checklist.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="qcActivityDetailForm" onsubmit="return submitQcActivityDetail(event)">
+          <div class="upload-grid">
+            <div class="field"><label>QC Activity</label>
+              <select id="qcActivityDetailActivity" required><option value="">Select&hellip;</option></select>
+            </div>
+            <div class="field full"><label>Checklist Detail</label><input type="text" id="qcActivityDetailText" placeholder="e.g. Checked the diagonal of the building." required></div>
+            <div class="full" style="display:flex; gap:10px;">
+              <button class="btn btn-teal" type="submit" id="qcActivityDetailSubmitBtn">Save</button>
+              <button class="btn btn-ghost" type="button" id="qcActivityDetailCancelBtn" style="display:none;" onclick="cancelQcActivityDetailEdit()">Cancel</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>QC Activity</th><th>Checklist Detail</th><th></th></tr></thead>
+          <tbody id="qcActivityDetailTableBody"><tr><td colspan="3"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- MANAGE MATERIALS VIEW (admin only) ---------------- -->
+    <div class="view" id="materialsMasterView">
+      <div class="view-head"><h2>Manage Materials</h2><button class="btn btn-teal" onclick="openCreateMasterModal('materialMasters')">+ Create Material</button></div>
+      <div class="view-sub">Feeds the Material dropdown on Material Testing Details and Material Testing. Entries in use can't be edited or deleted.</div>
+      <div class="card panel" style="max-width:640px;" id="materialsMasterPanel"></div>
+    </div>
+
+    <!-- ---------------- MATERIAL TESTING DETAILS VIEW (admin only) ---------------- -->
+    <div class="view" id="materialTestDetailsView">
+      <div class="view-head"><h2>Material Testing Details</h2></div>
+      <div class="view-sub">The specific tests performed for each Material, e.g. "Compressive Strength" for Solid Block.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="materialTestDetailForm" onsubmit="return submitMaterialTestDetail(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Material</label>
+              <select id="materialTestDetailMaterial" required><option value="">Select material&hellip;</option></select>
+            </div>
+            <div class="field full"><label>Test Details</label><input type="text" id="materialTestDetailText" placeholder="e.g. Compressive Strength" required></div>
+            <div class="full" style="display:flex; gap:10px;">
+              <button class="btn btn-teal" type="submit" id="materialTestDetailSubmitBtn">Save</button>
+              <button class="btn btn-ghost" type="button" id="materialTestDetailCancelBtn" style="display:none;" onclick="cancelMaterialTestDetailEdit()">Cancel</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Material</th><th>Test Details</th><th></th></tr></thead>
+          <tbody id="materialTestDetailTableBody"><tr><td colspan="3"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- ---------------- MANAGE ROLES VIEW (admin only) ---------------- -->
@@ -655,6 +1025,95 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createStatusModalOverlay')">Cancel</button>
       <button class="btn btn-teal" onclick="submitCreateStatus()">Create Status</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- EDIT SNAG MODAL ---------------- -->
+<div class="modal-overlay" id="editSnagModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Snag Point</h3><button class="modal-close" onclick="closeModal('editSnagModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Project</label><select id="editSnagProject"></select></div>
+      <div class="field"><label>Flat</label><input type="text" id="editSnagFlat"></div>
+      <div class="field"><label>Site Engineer</label><select id="editSnagSiteEngineer"><option value="">Select&hellip;</option></select></div>
+      <div class="field"><label>Project Manager</label><select id="editSnagProjectManager"><option value="">Select&hellip;</option></select></div>
+      <div class="field"><label>Snag Point</label><textarea id="editSnagText" rows="2"></textarea></div>
+      <div class="field" id="editSnagFileFieldWrap"></div>
+      <div class="field" style="display:flex; gap:18px;">
+        <label style="display:flex; align-items:center; gap:7px; margin:0;"><input type="checkbox" id="editSnagRectified" style="width:auto;"> Rectified</label>
+        <label style="display:flex; align-items:center; gap:7px; margin:0;"><input type="checkbox" id="editSnagQcApproved" style="width:auto;"> QC Approved</label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('editSnagModalOverlay')">Cancel</button>
+      <button class="btn" style="background:var(--red); color:#fff; margin-right:auto;" onclick="deleteSnag()">Delete</button>
+      <button class="btn btn-teal" onclick="submitEditSnag()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- QC CHECKLIST REJECT MODAL ---------------- -->
+<div class="modal-overlay" id="qcChecklistRejectModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Reject Inspection</h3><button class="modal-close" onclick="closeModal('qcChecklistRejectModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Reason for rejection</label><textarea id="qcChecklistRejectReason" rows="3" placeholder="Why is this being rejected&hellip;"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('qcChecklistRejectModalOverlay')">Cancel</button>
+      <button class="btn" style="background:var(--red); color:#fff;" onclick="submitQcChecklistReject()">Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- QC RECTIFY MODAL ---------------- -->
+<div class="modal-overlay" id="qcRectifyModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Rectify Observation</h3><button class="modal-close" onclick="closeModal('qcRectifyModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Remarks</label><textarea id="qcRectifyRemarks" rows="3" placeholder="What was done to fix this&hellip;"></textarea></div>
+      <div class="field"><label>Photo of the fix</label><input type="file" id="qcRectifyFile" accept="image/*"></div>
+      <div class="progress-wrap" id="qcRectifyProgressWrap"><div class="progress-bar" id="qcRectifyProgressBar"></div></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('qcRectifyModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="qcRectifyConfirmBtn" onclick="submitQcRectify()">Mark Rectified</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- QC RECHECK MODAL ---------------- -->
+<div class="modal-overlay" id="qcRecheckModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Recheck Observation</h3><button class="modal-close" onclick="closeModal('qcRecheckModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Review status</label>
+        <select id="qcRecheckStatus">
+          <option value="ok">Ok</option>
+          <option value="done">Done</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+      <div class="field"><label>Remarks</label><textarea id="qcRecheckRemarks" rows="3" placeholder="Optional&hellip;"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('qcRecheckModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" onclick="submitQcRecheck()">Confirm Recheck</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- QC PH REJECT MODAL ---------------- -->
+<div class="modal-overlay" id="qcPhRejectModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Reject Observation</h3><button class="modal-close" onclick="closeModal('qcPhRejectModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Reason for rejection</label><textarea id="qcPhRejectReason" rows="3" placeholder="Why is this being sent back&hellip;"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('qcPhRejectModalOverlay')">Cancel</button>
+      <button class="btn" style="background:var(--red); color:#fff;" onclick="submitQcPhReject()">Reject</button>
     </div>
   </div>
 </div>
