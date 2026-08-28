@@ -802,6 +802,7 @@ function listenRoleMasters(){
     if(currentUser && currentUser.role === 'admin'){
       renderRolesMasterView();
       renderWorkflowConfigView(); // its role picker reflects ROLE_LABELS too
+      renderPageAccessView(); // its matrix rows are roles too
     }
   }, err => console.error('role masters listener:', err));
   activeSessionUnsubs.push(unsub);
@@ -2497,6 +2498,83 @@ function clearSnagReportFilters(){
   renderSnagReportTable();
 }
 
+/* ============================================================
+   PAGE ACCESS
+   Per-role visibility for the 13 pages listed in PAGE_ACCESS_ITEMS
+   (index.html). Admin always has full access and is never shown as a row
+   here. A role with no document, or no explicit false for a given page,
+   defaults to ALLOWED — access is only restricted by explicitly
+   unchecking a box, so rolling this out never silently locks anyone out
+   of a page they could already see.
+============================================================ */
+let pageAccessData = {}; // { [roleId]: { pages: { [pageKey]: bool } } }
+
+function listenPageAccess(){
+  const unsub = db.collection('rolePageAccess').onSnapshot(snap => {
+    const data = {};
+    snap.docs.forEach(d => { data[d.id] = d.data(); });
+    pageAccessData = data;
+    applyPageAccessToNav();
+    if(currentUser && currentUser.role === 'admin') renderPageAccessView();
+  }, err => console.error('rolePageAccess listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function canAccessPage(pageKey){
+  if(!currentUser) return false;
+  if(currentUser.role === 'admin') return true;
+  if(!PAGE_ACCESS_ITEMS.some(i => i.key === pageKey)) return true; // not a restrictable page (e.g. an admin-only page) — separately gated already
+  const roleAccess = pageAccessData[currentUser.role];
+  if(!roleAccess || !roleAccess.pages) return true;
+  if(!(pageKey in roleAccess.pages)) return true;
+  return roleAccess.pages[pageKey] !== false;
+}
+
+function applyPageAccessToNav(){
+  if(!currentUser) return;
+  const activeEl = document.querySelector('.view.active');
+  const activeViewId = activeEl ? activeEl.id : null;
+  let activeViewNowHidden = false;
+  PAGE_ACCESS_ITEMS.forEach(item => {
+    const btn = document.querySelector(`.nav-item[data-view="${item.key}"]`);
+    if(!btn) return;
+    const allowed = canAccessPage(item.key);
+    btn.classList.toggle('hidden', !allowed);
+    if(item.key === activeViewId && !allowed) activeViewNowHidden = true;
+  });
+  if(activeViewNowHidden){
+    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
+    switchView(fallback ? fallback.key : 'uploadView');
+  }
+}
+
+function renderPageAccessView(){
+  const panel = document.getElementById('pageAccessPanel');
+  if(!panel) return;
+  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
+  if(roleIds.length === 0){
+    panel.innerHTML = `<div class="master-empty">No non-Admin roles exist yet — add one under Manage Roles first.</div>`;
+    return;
+  }
+  const headerCells = roleIds.map(id => `<th style="text-align:center; white-space:nowrap;">${escapeHtml(ROLE_LABELS[id])}</th>`).join('');
+  const rows = PAGE_ACCESS_ITEMS.map(item => {
+    const cells = roleIds.map(roleId => {
+      const allowed = (pageAccessData[roleId] && pageAccessData[roleId].pages && (item.key in pageAccessData[roleId].pages))
+        ? pageAccessData[roleId].pages[item.key] !== false
+        : true;
+      return `<td style="text-align:center;"><input type="checkbox" ${allowed ? 'checked' : ''} onchange="togglePageAccess('${roleId}','${item.key}',this.checked)"></td>`;
+    }).join('');
+    return `<tr><td>${escapeHtml(item.label)}</td>${cells}</tr>`;
+  }).join('');
+  panel.innerHTML = `<table><thead><tr><th>Page</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function togglePageAccess(roleId, pageKey, checked){
+  db.collection('rolePageAccess').doc(roleId).set({ pages: { [pageKey]: checked } }, { merge: true })
+    .then(() => toast('Saved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+
 function startListeners(){
   stopSessionListeners(); // safety: clear anything left over before attaching fresh ones
   populateStatusFilterOptions(); // seed with current STATUS_LABELS immediately, live listener refines it
@@ -2513,6 +2591,7 @@ function startListeners(){
   listenMaterialTestDetails();
   listenMaterialTestLogs();
   listenFinalSnagPoints();
+  listenPageAccess();
   listenUsers(); // needed by everyone now, not just admins — populates Site Engineer/Project Manager selects for Final Snag Point
   refreshMasterDataPanels(); // in case this admin's panels were open before this fired
 }
@@ -2549,6 +2628,7 @@ function stopSessionListeners(){
   finalSnagPointsData = [];
   snagFile = null;
   activeSnagId = null;
+  pageAccessData = {};
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
