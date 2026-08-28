@@ -1546,6 +1546,7 @@ function switchView(viewId, opts){
   target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view===viewId));
   document.getElementById('notifPanel').classList.remove('active');
+  if(viewId === 'userAccessView' && typeof populateUaUserSelect === 'function') populateUaUserSelect();
   if(!opts.skipHistory){
     history.pushState({ view: viewId }, '', '#' + viewId);
   }
