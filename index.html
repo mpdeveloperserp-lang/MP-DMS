@@ -437,6 +437,7 @@
     <div class="nav-group-label hidden" id="adminConfigGroup" style="margin-top:10px;">Configuration</div>
     <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
     <button class="nav-item hidden" id="adminStatusNavBtn" data-view="statusConfigView" onclick="switchView('statusConfigView')"><span class="ic">&#127991;</span> Status Labels</button>
+    <button class="nav-item hidden" id="adminPageAccessNavBtn" data-view="pageAccessView" onclick="switchView('pageAccessView')"><span class="ic">&#128274;</span> Page Access</button>
   </div>
 
   <div class="main">
@@ -928,6 +929,13 @@
       <div class="card panel" id="statusConfigPanel"></div>
     </div>
 
+    <!-- ---------------- PAGE ACCESS VIEW (admin only) ---------------- -->
+    <div class="view" id="pageAccessView">
+      <div class="view-head"><h2>Page Access</h2></div>
+      <div class="view-sub">Control which pages each role can see, e.g. limit a role to just Upload/Queue/Documents, or just the QC pages. <b>Admin</b> always has full access. A role with nothing unchecked below can see everything &mdash; access is only restricted where you explicitly uncheck a box.</div>
+      <div class="card panel" id="pageAccessPanel" style="overflow-x:auto;"></div>
+    </div>
+
   </div>
 </div>
 
@@ -1236,6 +1244,25 @@ const DEFAULT_STATUS_LABELS = {
   approved:'Approved', published:'Published', rejected:'Rejected'
 };
 let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
+
+// Pages an Admin can restrict per-role under Page Access. Admin-only
+// sections (Manage Users, Master Data, Configuration) aren't part of this —
+// those are already gated by the existing admin-role check.
+const PAGE_ACCESS_ITEMS = [
+  { key: 'uploadView', label: 'Upload Document' },
+  { key: 'queueView', label: 'My Approval Queue' },
+  { key: 'docsView', label: 'Documents' },
+  { key: 'qcObservationView', label: 'QC Observation' },
+  { key: 'qcRectifyView', label: 'QC Rectify' },
+  { key: 'qcRecheckView', label: 'QC Recheck' },
+  { key: 'qcPhApprovalView', label: 'QC PH Approval' },
+  { key: 'qcChecklistInspectionView', label: 'QC Checklist Inspection' },
+  { key: 'qcChecklistApprovalView', label: 'QC Checklist Approval' },
+  { key: 'materialTestLogView', label: 'Material Testing' },
+  { key: 'materialTestReportView', label: 'Material Testing Report' },
+  { key: 'finalSnagPointView', label: 'Final Snag Point' },
+  { key: 'finalSnagPointReportView', label: 'Final Snag Point Report' }
+];
 let STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
 
 function freshSteps(resolvedSteps){
@@ -1336,7 +1363,9 @@ function enterApp(){
     document.getElementById('adminConfigGroup').classList.remove('hidden');
     document.getElementById('adminWorkflowNavBtn').classList.remove('hidden');
     document.getElementById('adminStatusNavBtn').classList.remove('hidden');
+    document.getElementById('adminPageAccessNavBtn').classList.remove('hidden');
   }
+  if(typeof applyPageAccessToNav === 'function') applyPageAccessToNav(); // permissive default until listenPageAccess's live data arrives
   if(typeof startListeners === 'function'){
     startListeners();
   } else {
@@ -1394,6 +1423,11 @@ function loadUserProfile(uid){
 ============================================================ */
 function switchView(viewId, opts){
   opts = opts || {};
+  if(!opts.skipAccessCheck && typeof canAccessPage === 'function' && !canAccessPage(viewId)){
+    toast("You don't have access to that page.", 'err');
+    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
+    viewId = fallback ? fallback.key : 'uploadView';
+  }
   const target = document.getElementById(viewId);
   if(!target) return;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
