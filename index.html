@@ -177,6 +177,14 @@
   .master-item button{border:none; background:transparent; color:var(--red); font-size:15px; line-height:1; padding:2px 4px; border-radius:5px;}
   .master-item button:hover{background:var(--red-soft);}
   .master-empty{font-size:12.5px; color:var(--text-muted); text-align:center; padding:14px 4px;}
+  .dual-listbox{display:flex; align-items:stretch; gap:10px;}
+  .dual-listbox-col{flex:1; display:flex; flex-direction:column; min-width:0;}
+  .dual-listbox-col label{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); font-weight:700; margin-bottom:5px;}
+  .dual-listbox select{flex:1; min-height:150px; border:1px solid var(--border); border-radius:7px; padding:6px; font-size:13px; font-family:var(--body);}
+  .dual-listbox select option{padding:4px 6px; border-radius:4px;}
+  .dual-listbox-buttons{display:flex; flex-direction:column; justify-content:center; gap:8px;}
+  .dual-listbox-buttons button{width:36px; height:32px; border:1px solid var(--border); background:var(--card); border-radius:7px; font-weight:700; cursor:pointer; color:var(--navy);}
+  .dual-listbox-buttons button:hover{background:var(--bg);}
   .master-row-actions{display:flex; gap:2px; flex:none;}
   .icon-btn-sm{width:24px; height:24px; border:none; background:transparent; border-radius:5px; font-size:12px; color:var(--text-muted); cursor:pointer;}
   .icon-btn-sm:hover{background:var(--border); color:var(--navy);}
@@ -440,6 +448,7 @@
     <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
     <button class="nav-item hidden" id="adminStatusNavBtn" data-view="statusConfigView" onclick="switchView('statusConfigView')"><span class="ic">&#127991;</span> Status Labels</button>
     <button class="nav-item hidden" id="adminPageAccessNavBtn" data-view="pageAccessView" onclick="switchView('pageAccessView')"><span class="ic">&#128274;</span> Page Access</button>
+    <button class="nav-item hidden" id="adminStaffingNavBtn" data-view="projectStaffingView" onclick="switchView('projectStaffingView')"><span class="ic">&#128101;</span> Role-to-Project Staffing</button>
   </div>
 
   <div class="main">
@@ -998,6 +1007,37 @@
       </div>
     </div>
 
+    <!-- ---------------- ROLE-TO-PROJECT STAFFING VIEW (admin only) ---------------- -->
+    <div class="view" id="projectStaffingView">
+      <div class="view-head"><h2>Role-to-Project Staffing</h2></div>
+      <div class="view-sub">Assign which roles are active on which projects. Select one or more roles and one or more projects, then click Save. When a role is later restricted to specific projects, users holding that role will only see those projects in dropdowns. Use the search box to filter each list.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <div style="display:flex; gap:24px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:240px;">
+            <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;">Application Role</div>
+            <input type="text" id="staffingRoleSearch" placeholder="Search roles…" style="width:100%; margin-bottom:8px;" oninput="renderStaffingLists()">
+            <div id="staffingRoleList" style="max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:8px;"></div>
+          </div>
+          <div style="flex:1; min-width:240px;">
+            <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;">Project</div>
+            <input type="text" id="staffingProjectSearch" placeholder="Search projects…" style="width:100%; margin-bottom:8px;" oninput="renderStaffingLists()">
+            <div id="staffingProjectList" style="max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:8px;"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+          <button class="btn btn-teal" onclick="saveStaffing()">Save</button>
+          <button class="btn btn-ghost" onclick="resetStaffingSelection()">Reset</button>
+          <span id="staffingStatus" style="font-size:12.5px; color:var(--text-muted);"></span>
+        </div>
+      </div>
+      <div class="card" id="staffingResultPanel" style="display:none;">
+        <table>
+          <thead><tr><th>Role</th><th>Projects</th></tr></thead>
+          <tbody id="staffingResultBody"></tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1074,6 +1114,18 @@
       </div>
       <div class="field"><label>Department <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
         <select id="newUserDept"><option value="">Select department&hellip; (or leave blank)</option></select>
+      </div>
+      <div class="field">
+        <label>Additional Roles <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <div class="dual-listbox">
+          <div class="dual-listbox-col"><label>Available</label><select id="newUserRolesAvailable" multiple></select></div>
+          <div class="dual-listbox-buttons">
+            <button type="button" onclick="moveDualListbox('newUserRolesAvailable','newUserRolesSelected')">&gt;</button>
+            <button type="button" onclick="moveDualListbox('newUserRolesSelected','newUserRolesAvailable')">&lt;</button>
+          </div>
+          <div class="dual-listbox-col"><label>Selected</label><select id="newUserRolesSelected" multiple></select></div>
+        </div>
+        <div class="auth-hint">Someone can hold their main Role above plus any of these &mdash; their access becomes the combination of all of them.</div>
       </div>
       <div class="auth-hint" style="margin-top:0;">Share the email and temporary password with them directly &mdash; there's no automated invite email in this build. They can sign in right away.</div>
     </div>
@@ -1221,6 +1273,18 @@
         <select id="editUserDept"><option value="">Select department&hellip; (or leave blank)</option></select>
       </div>
       <div class="field">
+        <label>Additional Roles <span style="font-weight:400; color:var(--text-muted);">(optional)</span></label>
+        <div class="dual-listbox">
+          <div class="dual-listbox-col"><label>Available</label><select id="editUserRolesAvailable" multiple></select></div>
+          <div class="dual-listbox-buttons">
+            <button type="button" onclick="moveDualListbox('editUserRolesAvailable','editUserRolesSelected')">&gt;</button>
+            <button type="button" onclick="moveDualListbox('editUserRolesSelected','editUserRolesAvailable')">&lt;</button>
+          </div>
+          <div class="dual-listbox-col"><label>Selected</label><select id="editUserRolesSelected" multiple></select></div>
+        </div>
+        <div class="auth-hint">They hold their main Role above plus any of these &mdash; access becomes the combination of all of them.</div>
+      </div>
+      <div class="field">
         <label>Status</label>
         <select id="editUserStatus">
           <option value="enabled">Enabled</option>
@@ -1359,7 +1423,7 @@ function freshSteps(resolvedSteps){
 // app-workflow.js (they belong to logic that lives there). Declaring them
 // here too would throw a duplicate-declaration SyntaxError, since this
 // inline block and app-workflow.js share one global scope.
-let currentUser = null;      // {uid, name, email, role, department}
+let currentUser = null;      // {uid, name, email, role (primary — 'admin' or a role id), roles (additional role ids, non-admin), department}
 let selectedFile = null;
 let activeDocId = null;      // doc currently open in detail modal
 
@@ -1416,7 +1480,7 @@ auth.onAuthStateChanged(user => {
         auth.signOut();
         return;
       }
-      currentUser = { uid:user.uid, email:user.email, name:d.name, role:d.role, department:d.department };
+      currentUser = { uid:user.uid, email:user.email, name:d.name, role:d.role, roles:d.roles || [], department:d.department };
       enterApp();
     }).catch(err => {
       console.error('Failed to load user profile:', err);
@@ -1447,6 +1511,7 @@ function enterApp(){
     document.getElementById('adminWorkflowNavBtn').classList.remove('hidden');
     document.getElementById('adminStatusNavBtn').classList.remove('hidden');
     document.getElementById('adminPageAccessNavBtn').classList.remove('hidden');
+    document.getElementById('adminStaffingNavBtn').classList.remove('hidden');
   }
   if(typeof applyPageAccessToNav === 'function') applyPageAccessToNav(); // permissive default until listenPageAccess's live data arrives
   if(typeof startListeners === 'function'){
