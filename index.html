@@ -412,6 +412,8 @@
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
     <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
     <div class="nav-group-label">Quality Control</div>
+    <button class="nav-item" data-view="goodWorkView" onclick="switchView('goodWorkView')"><span class="ic">&#128077;</span> Good Quality Work</button>
+    <button class="nav-item" data-view="goodWorkReportView" onclick="switchView('goodWorkReportView')"><span class="ic">&#128202;</span> Good Work Report</button>
     <button class="nav-item" data-view="qcObservationView" onclick="switchView('qcObservationView')"><span class="ic">&#128269;</span> QC Observation</button>
     <button class="nav-item" data-view="qcRectifyView" onclick="switchView('qcRectifyView')"><span class="ic">&#128295;</span> QC Rectify<span class="nav-badge hidden" id="qcRectifyBadge">0</span></button>
     <button class="nav-item" data-view="qcRecheckView" onclick="switchView('qcRecheckView')"><span class="ic">&#128270;</span> QC Recheck<span class="nav-badge hidden" id="qcRecheckBadge">0</span></button>
@@ -515,6 +517,56 @@
           <tbody id="docsTableBody">
             <tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
           </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- GOOD QUALITY WORK VIEW ---------------- -->
+    <div class="view" id="goodWorkView">
+      <div class="view-head"><h2>Good Quality Work</h2></div>
+      <div class="view-sub">Log a positive callout &mdash; good work worth recognizing, with supporting photos.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <form id="goodWorkForm" onsubmit="return handleGoodWorkSubmit(event)">
+          <div class="upload-grid">
+            <div class="field"><label>Project</label>
+              <select id="goodWorkProject" required><option value="">Select project&hellip;</option></select>
+            </div>
+            <div class="field"><label>Location</label><input type="text" id="goodWorkLocation" placeholder="e.g. Kolapakkam"></div>
+            <div class="field"><label>Remarks</label><input type="text" id="goodWorkRemarks" placeholder="What was done well&hellip;"></div>
+            <div class="field"><label>File 1</label><input type="file" id="goodWorkFile1" accept="image/*"></div>
+            <div class="field"><label>File 2</label><input type="file" id="goodWorkFile2" accept="image/*"></div>
+            <div class="field"><label>File 3</label><input type="file" id="goodWorkFile3" accept="image/*"></div>
+            <div class="progress-wrap" id="goodWorkProgressWrap"><div class="progress-bar" id="goodWorkProgressBar"></div></div>
+            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+              <button class="btn btn-teal" type="submit" id="goodWorkSubmitBtn">Save</button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Project</th><th>Location</th><th>Remarks</th><th>Photos</th><th></th></tr></thead>
+          <tbody id="goodWorkTableBody"><tr><td colspan="5"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- GOOD WORK REPORT VIEW ---------------- -->
+    <div class="view" id="goodWorkReportView">
+      <div class="view-head"><h2>Good Work Report</h2></div>
+      <div class="view-sub">Filterable view of every logged callout.</div>
+      <div class="card panel" style="margin-bottom:16px;">
+        <div class="doc-filter-row">
+          <div class="field" style="margin-bottom:0;"><label>Project</label><select id="goodWorkRptProject" onchange="renderGoodWorkReportTable()"><option value="">All projects</option></select></div>
+          <div class="field" style="margin-bottom:0;"><label>From</label><input type="date" id="goodWorkRptFrom" onchange="renderGoodWorkReportTable()"></div>
+          <div class="field" style="margin-bottom:0;"><label>To</label><input type="date" id="goodWorkRptTo" onchange="renderGoodWorkReportTable()"></div>
+          <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearGoodWorkReportFilters()">Clear filters</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Entry Date</th><th>Project</th><th>Location</th><th>Remarks</th><th>Created By</th><th>Photos</th></tr></thead>
+          <tbody id="goodWorkRptTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -933,7 +985,17 @@
     <div class="view" id="pageAccessView">
       <div class="view-head"><h2>Page Access</h2></div>
       <div class="view-sub">Control which pages each role can see, e.g. limit a role to just Upload/Queue/Documents, or just the QC pages. <b>Admin</b> always has full access. A role with nothing unchecked below can see everything &mdash; access is only restricted where you explicitly uncheck a box.</div>
-      <div class="card panel" id="pageAccessPanel" style="overflow-x:auto;"></div>
+      <div class="card panel" id="pageAccessPanel" style="overflow-x:auto; margin-bottom:20px;"></div>
+
+      <div class="view-head" style="margin-top:6px;"><h3 style="margin:0;">Per-User Overrides</h3></div>
+      <div class="view-sub">Carve out an exception for one specific person &mdash; their setting here wins over their role's default, for just the pages you touch. Everything else still follows their role.</div>
+      <div class="card panel">
+        <div class="field" style="max-width:320px;">
+          <label>User</label>
+          <select id="userAccessUserSelect" onchange="renderUserPageAccessRow()"><option value="">Select a user&hellip;</option></select>
+        </div>
+        <div id="userAccessRowWrap"></div>
+      </div>
     </div>
 
   </div>
@@ -1033,6 +1095,25 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createStatusModalOverlay')">Cancel</button>
       <button class="btn btn-teal" onclick="submitCreateStatus()">Create Status</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- EDIT GOOD WORK MODAL ---------------- -->
+<div class="modal-overlay" id="editGoodWorkModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Good Quality Work</h3><button class="modal-close" onclick="closeModal('editGoodWorkModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Project</label><select id="editGoodWorkProject"></select></div>
+      <div class="field"><label>Location</label><input type="text" id="editGoodWorkLocation"></div>
+      <div class="field"><label>Remarks</label><input type="text" id="editGoodWorkRemarks"></div>
+      <div class="field" id="editGoodWorkPhotosWrap"></div>
+      <div class="auth-hint">Photos can't be replaced here &mdash; delete and re-log the entry if the photos need to change.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('editGoodWorkModalOverlay')">Cancel</button>
+      <button class="btn" style="background:var(--red); color:#fff; margin-right:auto;" onclick="deleteGoodWork()">Delete</button>
+      <button class="btn btn-teal" onclick="submitEditGoodWork()">Save</button>
     </div>
   </div>
 </div>
@@ -1252,6 +1333,8 @@ const PAGE_ACCESS_ITEMS = [
   { key: 'uploadView', label: 'Upload Document' },
   { key: 'queueView', label: 'My Approval Queue' },
   { key: 'docsView', label: 'Documents' },
+  { key: 'goodWorkView', label: 'Good Quality Work' },
+  { key: 'goodWorkReportView', label: 'Good Work Report' },
   { key: 'qcObservationView', label: 'QC Observation' },
   { key: 'qcRectifyView', label: 'QC Rectify' },
   { key: 'qcRecheckView', label: 'QC Recheck' },
