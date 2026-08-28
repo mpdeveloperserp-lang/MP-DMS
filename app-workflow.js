@@ -37,6 +37,19 @@ function isOverdue(v){
 function humanizeAction(a){
   return { uploaded:'uploaded the document', step_approved:'approved a step', step_rejected:'rejected the document', resubmitted:'submitted a revised version' }[a] || a;
 }
+// A user's EFFECTIVE roles: their primary `role` plus whatever's in their
+// `roles` array (additional roles), deduped. Deliberately does NOT special-
+// case 'admin' — the admin check stays a separate, untouched `role ===
+// 'admin'` comparison everywhere else in the app (and in Firestore rules),
+// so this helper only ever affects non-admin capability matching (workflow
+// steps, page access, notifications) and never the admin security boundary.
+function getUserRoles(user){
+  if(!user) return [];
+  const set = new Set();
+  if(user.role) set.add(user.role);
+  (user.roles || []).forEach(r => { if(r) set.add(r); });
+  return [...set];
+}
 
 /* ============================================================
    NOTIFICATIONS
@@ -58,13 +71,18 @@ function notifyUser(uid, message, docId){
 
 let notifMap = new Map();
 function listenNotifications(){
-  const unsub1 = db.collection('notifications').where('forRole','==',currentUser.role).orderBy('createdAt','desc').limit(30)
-    .onSnapshot(snap => { snap.docChanges().forEach(upsertNotif); renderNotifications(); },
-      err => console.error('notif(role) listener:', err));
+  // One listener per effective role (primary + any additional) — a user
+  // with several roles should see notifications addressed to any of them.
+  getUserRoles(currentUser).forEach(roleId => {
+    const unsub = db.collection('notifications').where('forRole','==',roleId).orderBy('createdAt','desc').limit(30)
+      .onSnapshot(snap => { snap.docChanges().forEach(upsertNotif); renderNotifications(); },
+        err => console.error('notif(role) listener:', err));
+    activeSessionUnsubs.push(unsub);
+  });
   const unsub2 = db.collection('notifications').where('toUid','==',currentUser.uid).orderBy('createdAt','desc').limit(30)
     .onSnapshot(snap => { snap.docChanges().forEach(upsertNotif); renderNotifications(); },
       err => console.error('notif(uid) listener:', err));
-  activeSessionUnsubs.push(unsub1, unsub2);
+  activeSessionUnsubs.push(unsub2);
 }
 function upsertNotif(ch){
   if(ch.type === 'removed') notifMap.delete(ch.doc.id);
@@ -133,8 +151,9 @@ function listenQueue(){
   activeSessionUnsubs.push(unsub);
 }
 function renderQueue(){
+  const myRoles = getUserRoles(currentUser);
   let mine = Array.from(queueMap.values()).filter(v =>
-    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (s.role === currentUser.role || currentUser.role === 'admin'))
+    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (myRoles.includes(s.role) || currentUser.role === 'admin'))
   );
   mine.sort((a,b) => ((a.uploadedAt&&a.uploadedAt.toMillis)?a.uploadedAt.toMillis():0) - ((b.uploadedAt&&b.uploadedAt.toMillis)?b.uploadedAt.toMillis():0));
 
@@ -153,13 +172,14 @@ function renderQueue(){
   if(queueShowOverdueOnly) mine = mine.filter(isOverdue);
   const list = document.getElementById('queueList');
   if(mine.length === 0){
+    const myRoleNames = myRoles.map(r => ROLE_LABELS[r] || r).join(', ');
     list.innerHTML = queueShowOverdueOnly
       ? `<div class="empty-state"><div class="ic">&#9989;</div><b>Nothing overdue</b><div>None of your pending items are over 2 days old. <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="toggleOverdueOnly()">Show all</button></div></div>`
-      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on your ${escapeHtml(ROLE_LABELS[currentUser.role]||'')} approval right now.</div></div>`;
+      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on your ${escapeHtml(myRoleNames)} approval right now.</div></div>`;
     return;
   }
   list.innerHTML = mine.map(v => {
-    const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && (s.role === currentUser.role || currentUser.role === 'admin'));
+    const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && (myRoles.includes(s.role) || currentUser.role === 'admin'));
     const maxStage = Math.max(...v.steps.map(s => s.stage));
     const isFinal = myStep.stage === maxStage;
     const overdue = isOverdue(v);
@@ -306,10 +326,11 @@ function renderDetail(docData, versions, latest, history){
     return `<div class="stage-node ${cls}"><div class="line"></div><div class="circle">${icon}</div><div class="lbl">${escapeHtml(label)}</div></div>`;
   }).join('');
 
+  const myRolesForDetail = getUserRoles(currentUser);
   const stepRows = latest.steps.map(s => {
     let rowCls = s.decision !== 'pending' ? s.decision : (latest.status !== 'rejected' && s.stage === latest.currentStage ? 'active' : 'pending');
     const canAct = latest.status !== 'rejected' && latest.status !== 'published' && s.decision === 'pending' &&
-      s.stage === latest.currentStage && (s.role === currentUser.role || currentUser.role === 'admin');
+      s.stage === latest.currentStage && (myRolesForDetail.includes(s.role) || currentUser.role === 'admin');
     const isFinal = s.stage === maxStage;
     const icon = s.decision === 'approved' ? '&#10003;' : s.decision === 'rejected' ? '&#10007;' : (rowCls === 'active' ? '&#8987;' : '&hellip;');
     let extra;
@@ -610,6 +631,7 @@ function listenMasters(){
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
       refreshMasterDataPanels();
       if(mt.key === 'categoryMasters' && currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+      if(mt.key === 'projectMasters' && currentUser && currentUser.role === 'admin') renderStaffingLists();
     }, err => console.error(mt.key + ' listener:', err));
     // Only track for teardown when running post-login (masters also load
     // pre-login for the old registration screen's use case — harmless to
@@ -818,10 +840,40 @@ function populateRoleSelects(){
     sel.innerHTML = optionsHtml;
     if(ROLE_LABELS[prevValue]) sel.value = prevValue;
   });
+  [['newUserRolesAvailable','newUserRolesSelected'], ['editUserRolesAvailable','editUserRolesSelected']].forEach(([availId, selId]) => {
+    const selEl = document.getElementById(selId);
+    if(!selEl) return;
+    const currentlySelected = Array.from(selEl.options).map(o => o.value);
+    populateRoleDualListbox(availId, selId, currentlySelected);
+  });
+}
+
+// Fills the two sides of a dual-listbox role picker: "Selected" gets the
+// given role IDs, "Available" gets every other non-admin role. Admin is
+// deliberately excluded from both sides — it's never an "additional" role,
+// it's the separate, untouched primary-role admin flag.
+function populateRoleDualListbox(availId, selId, selectedRoleIds){
+  const availEl = document.getElementById(availId);
+  const selEl = document.getElementById(selId);
+  if(!availEl || !selEl) return;
+  const selected = new Set((selectedRoleIds || []).filter(id => id && id !== 'admin'));
+  availEl.innerHTML = Object.entries(ROLE_LABELS)
+    .filter(([id]) => id !== 'admin' && !selected.has(id))
+    .map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('');
+  selEl.innerHTML = [...selected]
+    .map(id => `<option value="${id}">${escapeHtml(ROLE_LABELS[id] || id)}</option>`).join('');
+}
+// Moves every currently-highlighted <option> from one <select multiple>
+// to another — the standard vanilla-JS dual-listbox pattern.
+function moveDualListbox(fromId, toId){
+  const from = document.getElementById(fromId);
+  const to = document.getElementById(toId);
+  if(!from || !to) return;
+  Array.from(from.selectedOptions).forEach(opt => to.appendChild(opt));
 }
 
 function isRoleInUse(roleId){
-  return usersData.some(u => u.role === roleId) || workflowConfigStepsData.some(s => s.role === roleId);
+  return usersData.some(u => getUserRoles(u).includes(roleId)) || workflowConfigStepsData.some(s => s.role === roleId);
 }
 
 function renderRolesMasterView(){
@@ -1351,10 +1403,12 @@ function renderUsersView(){
   body.innerHTML = usersData.map(u => {
     const enabled = u.enabled !== false;
     const isSelf = u.id === currentUser.uid;
+    const additionalNames = (u.roles || []).map(r => ROLE_LABELS[r] || r);
+    const roleDisplay = `<b>${escapeHtml(ROLE_LABELS[u.role] || u.role || '—')}</b>` + (additionalNames.length ? ` + ${escapeHtml(additionalNames.join(', '))}` : '');
     return `<tr>
       <td>${escapeHtml(u.name || '—')}</td>
       <td>${escapeHtml(u.email || '—')}</td>
-      <td>${escapeHtml(ROLE_LABELS[u.role] || u.role || '—')}</td>
+      <td>${roleDisplay}</td>
       <td>${escapeHtml(u.department || '—')}</td>
       <td><span class="badge ${enabled ? 'st-published' : 'st-rejected'}"><span class="dot"></span>${enabled ? 'Enabled' : 'Disabled'}</span></td>
       <td style="text-align:right;">
@@ -1374,6 +1428,7 @@ function openEditUserModal(uid){
   document.getElementById('editUserRole').value = u.role || '';
   document.getElementById('editUserDept').value = u.department || '';
   document.getElementById('editUserStatus').value = (u.enabled !== false) ? 'enabled' : 'disabled';
+  populateRoleDualListbox('editUserRolesAvailable', 'editUserRolesSelected', u.roles || []);
   const isSelf = uid === currentUser.uid;
   document.getElementById('editUserStatus').disabled = isSelf;
   document.getElementById('editUserSelfNote').classList.toggle('hidden', !isSelf);
@@ -1386,8 +1441,9 @@ function submitEditUser(){
   const role = document.getElementById('editUserRole').value;
   const department = document.getElementById('editUserDept').value;
   const status = document.getElementById('editUserStatus').value;
+  const additionalRoles = Array.from(document.getElementById('editUserRolesSelected').options).map(o => o.value);
   if(!name || !role){ toast('Please fill in name and role.', 'err'); return; }
-  const updates = { name, role, department: department || '' };
+  const updates = { name, role, roles: additionalRoles, department: department || '' };
   if(uid !== currentUser.uid) updates.enabled = (status === 'enabled');
   const btn = document.getElementById('editUserConfirmBtn');
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -1411,6 +1467,7 @@ function openCreateUserModal(){
   document.getElementById('newUserPassword').value = '';
   document.getElementById('newUserRole').value = '';
   document.getElementById('newUserDept').value = '';
+  populateRoleDualListbox('newUserRolesAvailable', 'newUserRolesSelected', []);
   openModal('createUserModalOverlay');
 }
 
@@ -1420,6 +1477,7 @@ function submitCreateUser(){
   const password = document.getElementById('newUserPassword').value;
   const role = document.getElementById('newUserRole').value;
   const department = document.getElementById('newUserDept').value;
+  const additionalRoles = Array.from(document.getElementById('newUserRolesSelected').options).map(o => o.value);
   if(!name || !email || !password || !role){ toast('Please fill in name, email, password, and role.', 'err'); return; }
   if(password.length < 6){ toast('Password should be at least 6 characters.', 'err'); return; }
 
@@ -1431,7 +1489,7 @@ function submitCreateUser(){
 
   secondaryAuth.createUserWithEmailAndPassword(email, password)
     .then(cred => db.collection('users').doc(cred.user.uid).set({
-      name, email, role, department: department || '',
+      name, email, role, roles: additionalRoles, department: department || '',
       enabled: true,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       createdBy: currentUser.uid
@@ -2545,10 +2603,17 @@ function canAccessPage(pageKey){
   if(userAccess && userAccess.pages && (pageKey in userAccess.pages)){
     return userAccess.pages[pageKey] !== false;
   }
-  const roleAccess = pageAccessData[currentUser.role];
-  if(!roleAccess || !roleAccess.pages) return true;
-  if(!(pageKey in roleAccess.pages)) return true;
-  return roleAccess.pages[pageKey] !== false;
+  // Otherwise, a page is allowed if ANY of the user's effective roles
+  // (primary or additional) allows it — holding multiple roles is meant
+  // to add capabilities, not narrow them.
+  const myRoles = getUserRoles(currentUser);
+  if(myRoles.length === 0) return true;
+  return myRoles.some(roleId => {
+    const roleAccess = pageAccessData[roleId];
+    if(!roleAccess || !roleAccess.pages) return true;
+    if(!(pageKey in roleAccess.pages)) return true;
+    return roleAccess.pages[pageKey] !== false;
+  });
 }
 
 function applyPageAccessToNav(){
@@ -2619,7 +2684,7 @@ function populateUserAccessUserSelect(){
   const prevValue = sel.value;
   const nonAdminUsers = usersData.filter(u => u.role !== 'admin');
   sel.innerHTML = '<option value="">Select a user&hellip;</option>' +
-    nonAdminUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)} &mdash; ${escapeHtml(ROLE_LABELS[u.role] || u.role)}</option>`).join('');
+    nonAdminUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)} &mdash; ${escapeHtml(getUserRoles(u).map(r => ROLE_LABELS[r] || r).join(', '))}</option>`).join('');
   if(nonAdminUsers.some(u => u.id === prevValue)) sel.value = prevValue;
 }
 
@@ -2631,12 +2696,24 @@ function renderUserPageAccessRow(){
   const user = usersData.find(u => u.id === uid);
   if(!user){ wrap.innerHTML = ''; return; }
   const userOverrides = (userPageAccessData[uid] && userPageAccessData[uid].pages) || {};
-  const roleAccess = pageAccessData[user.role];
+  const myRoles = getUserRoles(user);
   const hasAnyOverride = Object.keys(userOverrides).length > 0;
+
+  // Role default here is the UNION across all of this user's roles — same
+  // "any role grants it" logic as canAccessPage.
+  function roleDefaultFor(pageKey){
+    if(myRoles.length === 0) return true;
+    return myRoles.some(roleId => {
+      const roleAccess = pageAccessData[roleId];
+      if(!roleAccess || !roleAccess.pages) return true;
+      if(!(pageKey in roleAccess.pages)) return true;
+      return roleAccess.pages[pageKey] !== false;
+    });
+  }
 
   const rows = PAGE_ACCESS_ITEMS.map(item => {
     const hasOverride = item.key in userOverrides;
-    const roleDefault = (roleAccess && roleAccess.pages && (item.key in roleAccess.pages)) ? roleAccess.pages[item.key] !== false : true;
+    const roleDefault = roleDefaultFor(item.key);
     const effective = hasOverride ? userOverrides[item.key] !== false : roleDefault;
     return `<tr>
       <td>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</td>
@@ -2644,9 +2721,10 @@ function renderUserPageAccessRow(){
     </tr>`;
   }).join('');
 
+  const roleNames = myRoles.map(r => escapeHtml(ROLE_LABELS[r] || r)).join(', ') || '—';
   wrap.innerHTML = `
     <div style="margin:14px 0 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-      <div style="font-size:12.5px; color:var(--text-muted);">Role default: <b>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</b>. The boxes below start from that role's access &mdash; check/uncheck to set an exception just for ${escapeHtml(user.name)}, then click Save.</div>
+      <div style="font-size:12.5px; color:var(--text-muted);">Role defaults (combined): <b>${roleNames}</b>. A page is allowed by default if any of their roles allows it. The boxes below reflect that &mdash; check/uncheck to set an exception just for ${escapeHtml(user.name)}, then click Save.</div>
       <button class="btn btn-ghost btn-sm" onclick="resetUserPageAccess('${uid}')" ${hasAnyOverride ? '' : 'disabled'}>Reset to role defaults</button>
     </div>
     <table><thead><tr><th>Page</th><th style="width:90px;">Access</th></tr></thead><tbody>${rows}</tbody></table>
@@ -2838,6 +2916,120 @@ function clearGoodWorkReportFilters(){
   renderGoodWorkReportTable();
 }
 
+/* ============================================================
+   ROLE-TO-PROJECT STAFFING
+   Maps which roles are active on which projects. Stored as one document
+   per role in `projectStaffing/{roleId}` with a `projects: string[]`
+   field listing the project names that role is staffed on. Admin always
+   has access to all; non-admins with this feature enabled later could be
+   filtered to their staffed projects in upload/filter dropdowns (deferred
+   for now — this build records the mapping without yet enforcing it in
+   those dropdowns, so it can be turned on gradually).
+============================================================ */
+let projectStaffingData = {}; // { [roleId]: { projects: string[] } }
+
+function listenProjectStaffing(){
+  const unsub = db.collection('projectStaffing').onSnapshot(snap => {
+    const data = {};
+    snap.docs.forEach(d => { data[d.id] = d.data(); });
+    projectStaffingData = data;
+    if(currentUser && currentUser.role === 'admin'){
+      renderStaffingLists();
+      renderStaffingResultTable();
+    }
+  }, err => console.error('projectStaffing listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function renderStaffingLists(){
+  const roleSearch = (document.getElementById('staffingRoleSearch') ? document.getElementById('staffingRoleSearch').value : '').toLowerCase();
+  const projSearch = (document.getElementById('staffingProjectSearch') ? document.getElementById('staffingProjectSearch').value : '').toLowerCase();
+  const roleList = document.getElementById('staffingRoleList');
+  const projList = document.getElementById('staffingProjectList');
+  if(!roleList || !projList) return;
+
+  const roles = Object.entries(ROLE_LABELS).filter(([id]) => id !== 'admin');
+  const projects = mastersData.projectMasters.filter(p => !p.parentId);
+
+  roleList.innerHTML = roles
+    .filter(([, name]) => !roleSearch || name.toLowerCase().includes(roleSearch))
+    .map(([id, name]) => {
+      const staffedProjects = (projectStaffingData[id] && projectStaffingData[id].projects) || [];
+      const badge = staffedProjects.length ? ` <span style="font-size:11px; color:var(--teal);">(${staffedProjects.length} project${staffedProjects.length === 1 ? '' : 's'})</span>` : '';
+      return `<label style="display:flex; align-items:center; gap:8px; padding:5px 4px; cursor:pointer; border-radius:5px;">
+        <input type="checkbox" class="staffing-role-cb" value="${escapeHtml(id)}" style="width:auto;">
+        <span>${escapeHtml(name)}${badge}</span>
+      </label>`;
+    }).join('');
+
+  projList.innerHTML = projects
+    .filter(p => !projSearch || p.name.toLowerCase().includes(projSearch))
+    .map(p => `<label style="display:flex; align-items:center; gap:8px; padding:5px 4px; cursor:pointer; border-radius:5px;">
+      <input type="checkbox" class="staffing-proj-cb" value="${escapeHtml(p.name)}" style="width:auto;">
+      <span>${escapeHtml(p.name)}</span>
+    </label>`).join('');
+}
+
+function resetStaffingSelection(){
+  document.querySelectorAll('.staffing-role-cb, .staffing-proj-cb').forEach(cb => { cb.checked = false; });
+  document.getElementById('staffingStatus').textContent = '';
+  document.getElementById('staffingResultPanel').style.display = 'none';
+}
+
+function saveStaffing(){
+  const selectedRoles = Array.from(document.querySelectorAll('.staffing-role-cb:checked')).map(cb => cb.value);
+  const selectedProjects = Array.from(document.querySelectorAll('.staffing-proj-cb:checked')).map(cb => cb.value);
+  if(selectedRoles.length === 0){ toast('Please select at least one role.', 'err'); return; }
+  if(selectedProjects.length === 0){ toast('Please select at least one project.', 'err'); return; }
+
+  const status = document.getElementById('staffingStatus');
+  status.textContent = 'Saving…';
+
+  // For each selected role, MERGE the selected projects into its existing
+  // staffed-project list (so staffing from prior Save calls is preserved,
+  // not overwritten) using arrayUnion — idempotent and safe to call
+  // multiple times with the same projects.
+  const promises = selectedRoles.map(roleId =>
+    db.collection('projectStaffing').doc(roleId).set(
+      { projects: firebase.firestore.FieldValue.arrayUnion(...selectedProjects) },
+      { merge: true }
+    )
+  );
+  Promise.all(promises)
+    .then(() => {
+      toast('Staffing saved.', 'ok');
+      status.textContent = `${selectedRoles.length} role${selectedRoles.length === 1 ? '' : 's'} staffed on ${selectedProjects.length} project${selectedProjects.length === 1 ? '' : 's'}.`;
+      renderStaffingResultTable();
+    })
+    .catch(err => { toast('Could not save: ' + err.message, 'err'); status.textContent = ''; });
+}
+
+function removeStaffing(roleId, projectName){
+  db.collection('projectStaffing').doc(roleId).update({
+    projects: firebase.firestore.FieldValue.arrayRemove(projectName)
+  }).then(() => toast('Removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+function renderStaffingResultTable(){
+  const panel = document.getElementById('staffingResultPanel');
+  const body = document.getElementById('staffingResultBody');
+  if(!panel || !body) return;
+  const roleIds = Object.keys(ROLE_LABELS).filter(id => id !== 'admin');
+  const staffedRoles = roleIds.filter(id => projectStaffingData[id] && (projectStaffingData[id].projects || []).length > 0);
+  if(staffedRoles.length === 0){ panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  body.innerHTML = staffedRoles.map(id => {
+    const projects = projectStaffingData[id].projects || [];
+    const pills = projects.map(p =>
+      `<span class="step-chip approved" style="margin:2px;">${escapeHtml(p)}
+        <button onclick="removeStaffing('${escapeJs(id)}','${escapeJs(p)}')" style="border:none;background:none;cursor:pointer;font-size:11px;margin-left:3px;color:var(--text-muted);">&#x2715;</button>
+      </span>`
+    ).join('');
+    return `<tr><td>${escapeHtml(ROLE_LABELS[id] || id)}</td><td>${pills}</td></tr>`;
+  }).join('');
+}
+
 function startListeners(){
   stopSessionListeners(); // safety: clear anything left over before attaching fresh ones
   populateStatusFilterOptions(); // seed with current STATUS_LABELS immediately, live listener refines it
@@ -2855,6 +3047,7 @@ function startListeners(){
   listenMaterialTestLogs();
   listenFinalSnagPoints();
   listenGoodWork();
+  if(currentUser.role === 'admin') listenProjectStaffing();
   listenPageAccess();
   listenUserPageAccess();
   listenUsers(); // needed by everyone now, not just admins — populates Site Engineer/Project Manager selects for Final Snag Point
@@ -2897,6 +3090,7 @@ function stopSessionListeners(){
   userPageAccessData = {};
   goodWorkData = [];
   activeGoodWorkId = null;
+  projectStaffingData = {};
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
