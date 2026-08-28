@@ -572,7 +572,7 @@ function submitResubmission(){
    dropdowns; sub-items are an organizational reference for now.
 ============================================================ */
 const MASTER_TYPES = [
-  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject','qcObsProject','qcInspProject','matLogProject','matRptProject','snagProject','snagRptProject','editSnagProject'],
+  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject','qcObsProject','qcInspProject','matLogProject','matRptProject','snagProject','snagRptProject','editSnagProject','goodWorkProject','goodWorkRptProject','editGoodWorkProject'],
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
     inUseMessage: 'This project is in use and cannot be deleted.',
@@ -1334,6 +1334,8 @@ function listenUsers(){
       renderUsersView();
       refreshMasterDataPanels(); // department "in use" status depends on this data
       renderRolesMasterView(); // role "in use" status depends on this data
+      populateUserAccessUserSelect();
+      renderUserPageAccessRow();
     }
   }, err => console.error('users listener:', err));
   activeSessionUnsubs.push(unsub);
@@ -2500,14 +2502,18 @@ function clearSnagReportFilters(){
 
 /* ============================================================
    PAGE ACCESS
-   Per-role visibility for the 13 pages listed in PAGE_ACCESS_ITEMS
-   (index.html). Admin always has full access and is never shown as a row
-   here. A role with no document, or no explicit false for a given page,
-   defaults to ALLOWED — access is only restricted by explicitly
-   unchecking a box, so rolling this out never silently locks anyone out
-   of a page they could already see.
+   Two layers for the 13 pages in PAGE_ACCESS_ITEMS (index.html):
+   role-level (pageAccessData, sets the default for everyone with that
+   role) and user-level (userPageAccessData, an explicit override for one
+   specific person that wins over their role's setting for whichever
+   pages it touches — anything not touched still follows the role).
+   Admin always has full access and is never a row/option in either
+   layer. Both layers default to ALLOWED when nothing is configured, so
+   rolling this out never silently locks anyone out of a page they could
+   already see.
 ============================================================ */
 let pageAccessData = {}; // { [roleId]: { pages: { [pageKey]: bool } } }
+let userPageAccessData = {}; // { [uid]: { pages: { [pageKey]: bool } } }
 
 function listenPageAccess(){
   const unsub = db.collection('rolePageAccess').onSnapshot(snap => {
@@ -2519,11 +2525,26 @@ function listenPageAccess(){
   }, err => console.error('rolePageAccess listener:', err));
   activeSessionUnsubs.push(unsub);
 }
+function listenUserPageAccess(){
+  const unsub = db.collection('userPageAccess').onSnapshot(snap => {
+    const data = {};
+    snap.docs.forEach(d => { data[d.id] = d.data(); });
+    userPageAccessData = data;
+    applyPageAccessToNav();
+    if(currentUser && currentUser.role === 'admin') renderUserPageAccessRow();
+  }, err => console.error('userPageAccess listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
 
 function canAccessPage(pageKey){
   if(!currentUser) return false;
   if(currentUser.role === 'admin') return true;
   if(!PAGE_ACCESS_ITEMS.some(i => i.key === pageKey)) return true; // not a restrictable page (e.g. an admin-only page) — separately gated already
+  // A per-user override, once set for this specific page, wins outright.
+  const userAccess = userPageAccessData[currentUser.uid];
+  if(userAccess && userAccess.pages && (pageKey in userAccess.pages)){
+    return userAccess.pages[pageKey] !== false;
+  }
   const roleAccess = pageAccessData[currentUser.role];
   if(!roleAccess || !roleAccess.pages) return true;
   if(!(pageKey in roleAccess.pages)) return true;
@@ -2575,6 +2596,215 @@ function togglePageAccess(roleId, pageKey, checked){
     .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
 
+// --- Per-user overrides ---
+function populateUserAccessUserSelect(){
+  const sel = document.getElementById('userAccessUserSelect');
+  if(!sel) return;
+  const prevValue = sel.value;
+  const nonAdminUsers = usersData.filter(u => u.role !== 'admin');
+  sel.innerHTML = '<option value="">Select a user&hellip;</option>' +
+    nonAdminUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)} &mdash; ${escapeHtml(ROLE_LABELS[u.role] || u.role)}</option>`).join('');
+  if(nonAdminUsers.some(u => u.id === prevValue)) sel.value = prevValue;
+}
+
+function renderUserPageAccessRow(){
+  const wrap = document.getElementById('userAccessRowWrap');
+  if(!wrap) return;
+  const uid = document.getElementById('userAccessUserSelect').value;
+  if(!uid){ wrap.innerHTML = ''; return; }
+  const user = usersData.find(u => u.id === uid);
+  if(!user){ wrap.innerHTML = ''; return; }
+  const userOverrides = (userPageAccessData[uid] && userPageAccessData[uid].pages) || {};
+  const roleAccess = pageAccessData[user.role];
+  const hasAnyOverride = Object.keys(userOverrides).length > 0;
+
+  const rows = PAGE_ACCESS_ITEMS.map(item => {
+    const hasOverride = item.key in userOverrides;
+    const effective = hasOverride
+      ? userOverrides[item.key] !== false
+      : (roleAccess && roleAccess.pages && (item.key in roleAccess.pages) ? roleAccess.pages[item.key] !== false : true);
+    return `<tr>
+      <td>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</td>
+      <td style="text-align:center;"><input type="checkbox" ${effective ? 'checked' : ''} onchange="toggleUserPageAccess('${uid}','${item.key}',this.checked)"></td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div style="margin:14px 0 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div style="font-size:12.5px; color:var(--text-muted);">Role default: <b>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</b>. Checking/unchecking a box below creates a custom override for ${escapeHtml(user.name)} specifically &mdash; everything else still follows their role.</div>
+      <button class="btn btn-ghost btn-sm" onclick="resetUserPageAccess('${uid}')" ${hasAnyOverride ? '' : 'disabled'}>Reset to role defaults</button>
+    </div>
+    <table><thead><tr><th>Page</th><th style="width:90px;">Access</th></tr></thead><tbody>${rows}</tbody></table>
+  `;
+}
+
+function toggleUserPageAccess(uid, pageKey, checked){
+  db.collection('userPageAccess').doc(uid).set({ pages: { [pageKey]: checked } }, { merge: true })
+    .then(() => toast('Saved.', 'ok'))
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function resetUserPageAccess(uid){
+  if(!confirm("Remove all custom page-access overrides for this user? They'll go back to following their role's defaults.")) return;
+  db.collection('userPageAccess').doc(uid).delete()
+    .then(() => toast('Reset to role defaults.', 'ok'))
+    .catch(err => toast('Could not reset: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   GOOD QUALITY WORK
+   A positive-callout log — Project/Location/Remarks plus up to 3 photos,
+   with an editable list and a filterable report. No approval lifecycle
+   (matches the reference, which only shows Edit/Delete, not a review
+   chain) and not role-gated, consistent with the rest of this family.
+   Editing text fields is supported; replacing photos isn't (delete and
+   re-log instead) to avoid the complexity of tracking which of 3 slots
+   changed vs stayed the same.
+============================================================ */
+let goodWorkData = [];
+let activeGoodWorkId = null;
+
+function listenGoodWork(){
+  const unsub = db.collection('goodQualityWork').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    goodWorkData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderGoodWorkTable();
+    renderGoodWorkReportTable();
+  }, err => console.error('goodQualityWork listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function handleGoodWorkSubmit(ev){
+  ev.preventDefault();
+  const meta = {
+    project: document.getElementById('goodWorkProject').value,
+    location: document.getElementById('goodWorkLocation').value.trim(),
+    remarks: document.getElementById('goodWorkRemarks').value.trim()
+  };
+  if(!meta.project){ toast('Please choose a project.', 'err'); return false; }
+  const btn = document.getElementById('goodWorkSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const files = ['goodWorkFile1', 'goodWorkFile2', 'goodWorkFile3']
+    .map(id => document.getElementById(id).files[0])
+    .filter(Boolean);
+
+  const finish = (images) => {
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('goodQualityWork').add({
+      ...meta, images,
+      createdBy: currentUser.uid, createdByName: currentUser.name,
+      createdAt: now, updatedAt: now
+    }).then(() => {
+      toast('Saved.', 'ok');
+      document.getElementById('goodWorkForm').reset();
+    }).catch(err => toast('Could not save: ' + err.message, 'err'))
+      .finally(() => { btn.disabled = false; btn.textContent = 'Save'; document.getElementById('goodWorkProgressWrap').style.display = 'none'; });
+  };
+
+  function uploadNext(idx, images){
+    if(idx >= files.length) return finish(images);
+    const f = files[idx];
+    const path = `goodQualityWork/${Date.now()}_${idx}_${f.name}`;
+    document.getElementById('goodWorkProgressWrap').style.display = 'block';
+    const task = storage.ref(path).put(f);
+    task.on('state_changed',
+      snap => { document.getElementById('goodWorkProgressBar').style.width = ((snap.bytesTransferred / snap.totalBytes) * 100) + '%'; },
+      err => { toast('Upload failed: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Save'; },
+      () => task.snapshot.ref.getDownloadURL().then(url => uploadNext(idx + 1, [...images, url]))
+    );
+  }
+  if(files.length) uploadNext(0, []); else finish([]);
+  return false;
+}
+
+function goodWorkPhotoThumbs(images){
+  return (images || []).map(url => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" style="width:36px; height:36px; object-fit:cover; border-radius:5px; margin-right:4px;"></a>`).join('') || '—';
+}
+
+function renderGoodWorkTable(){
+  const body = document.getElementById('goodWorkTableBody');
+  if(!body) return;
+  if(goodWorkData.length === 0){
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state"><b>Nothing logged yet</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = goodWorkData.map(g => `
+    <tr onclick="openEditGoodWorkModal('${g.id}')">
+      <td>${escapeHtml(g.project || '—')}</td>
+      <td>${escapeHtml(g.location || '—')}</td>
+      <td>${escapeHtml(g.remarks || '—')}</td>
+      <td>${goodWorkPhotoThumbs(g.images)}</td>
+      <td style="text-align:right;"><button class="icon-btn-sm" onclick="event.stopPropagation(); openEditGoodWorkModal('${g.id}')" title="Edit">&#9999;&#65039;</button></td>
+    </tr>`).join('');
+}
+
+function openEditGoodWorkModal(id){
+  const g = goodWorkData.find(x => x.id === id);
+  if(!g) return;
+  activeGoodWorkId = id;
+  document.getElementById('editGoodWorkProject').value = g.project || '';
+  document.getElementById('editGoodWorkLocation').value = g.location || '';
+  document.getElementById('editGoodWorkRemarks').value = g.remarks || '';
+  document.getElementById('editGoodWorkPhotosWrap').innerHTML = (g.images && g.images.length)
+    ? `<label>Photos</label><div>${goodWorkPhotoThumbs(g.images)}</div>` : '';
+  openModal('editGoodWorkModalOverlay');
+}
+function submitEditGoodWork(){
+  const id = activeGoodWorkId;
+  const updates = {
+    project: document.getElementById('editGoodWorkProject').value,
+    location: document.getElementById('editGoodWorkLocation').value.trim(),
+    remarks: document.getElementById('editGoodWorkRemarks').value.trim(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(!updates.project){ toast('Please choose a project.', 'err'); return; }
+  db.collection('goodQualityWork').doc(id).update(updates)
+    .then(() => { toast('Saved.', 'ok'); closeModal('editGoodWorkModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'));
+}
+function deleteGoodWork(){
+  const id = activeGoodWorkId;
+  if(!confirm('Are you sure you want to delete this entry?')) return;
+  db.collection('goodQualityWork').doc(id).delete()
+    .then(() => { toast('Removed.', 'ok'); closeModal('editGoodWorkModalOverlay'); })
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+// --- Good Work Report ---
+function renderGoodWorkReportTable(){
+  const body = document.getElementById('goodWorkRptTableBody');
+  if(!body) return;
+  const project = document.getElementById('goodWorkRptProject') ? document.getElementById('goodWorkRptProject').value : '';
+  const fromDate = document.getElementById('goodWorkRptFrom') ? document.getElementById('goodWorkRptFrom').value : '';
+  const toDate = document.getElementById('goodWorkRptTo') ? document.getElementById('goodWorkRptTo').value : '';
+
+  const filtered = goodWorkData.filter(g => {
+    if(project && g.project !== project) return false;
+    if((fromDate || toDate) && g.createdAt && g.createdAt.toMillis){
+      const ms = g.createdAt.toMillis();
+      if(fromDate && ms < new Date(fromDate).getTime()) return false;
+      if(toDate && ms > new Date(toDate).getTime() + 86400000) return false;
+    }
+    return true;
+  });
+
+  if(filtered.length === 0){
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No entries match these filters</b></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(g => `
+    <tr>
+      <td>${timeAgo(g.createdAt)}</td>
+      <td>${escapeHtml(g.project || '—')}</td>
+      <td>${escapeHtml(g.location || '—')}</td>
+      <td>${escapeHtml(g.remarks || '—')}</td>
+      <td>${escapeHtml(g.createdByName || '—')}</td>
+      <td>${goodWorkPhotoThumbs(g.images)}</td>
+    </tr>`).join('');
+}
+function clearGoodWorkReportFilters(){
+  ['goodWorkRptProject','goodWorkRptFrom','goodWorkRptTo'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  renderGoodWorkReportTable();
+}
+
 function startListeners(){
   stopSessionListeners(); // safety: clear anything left over before attaching fresh ones
   populateStatusFilterOptions(); // seed with current STATUS_LABELS immediately, live listener refines it
@@ -2591,7 +2821,9 @@ function startListeners(){
   listenMaterialTestDetails();
   listenMaterialTestLogs();
   listenFinalSnagPoints();
+  listenGoodWork();
   listenPageAccess();
+  listenUserPageAccess();
   listenUsers(); // needed by everyone now, not just admins — populates Site Engineer/Project Manager selects for Final Snag Point
   refreshMasterDataPanels(); // in case this admin's panels were open before this fired
 }
@@ -2629,6 +2861,9 @@ function stopSessionListeners(){
   snagFile = null;
   activeSnagId = null;
   pageAccessData = {};
+  userPageAccessData = {};
+  goodWorkData = [];
+  activeGoodWorkId = null;
   STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
   ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 }
