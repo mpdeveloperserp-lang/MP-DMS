@@ -631,6 +631,7 @@ function listenMasters(){
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
       refreshMasterDataPanels();
       if(mt.key === 'categoryMasters' && currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+      if(mt.key === 'qcCategoryMasters' && currentUser && currentUser.role === 'admin' && activeWfModule === 'qc') renderQcWorkflowConfigView();
     }, err => console.error(mt.key + ' listener:', err));
     // Only track for teardown when running post-login (masters also load
     // pre-login for the old registration screen's use case — harmless to
@@ -1233,6 +1234,161 @@ function seedDefaultWorkflow(){
   batch.commit()
     .then(() => { toast('Starter workflow loaded.', 'ok'); openWorkflowConfigDetail(''); })
     .catch(err => toast('Could not seed: ' + err.message, 'err'));
+}
+
+// --- Workflow Configuration module tabs ---
+let activeWfModule = 'dms'; // 'dms' | 'qc'
+
+function switchWfModule(module){
+  activeWfModule = module;
+  const dmsTab = document.getElementById('wfTabDms');
+  const qcTab = document.getElementById('wfTabQc');
+  const dmsPnl = document.getElementById('wfPanelDms');
+  const qcPnl = document.getElementById('wfPanelQc');
+  if(!dmsTab || !qcTab || !dmsPnl || !qcPnl) return;
+  // Active tab = teal filled, inactive = ghost
+  if(module === 'dms'){
+    dmsTab.className = 'btn btn-teal';
+    qcTab.className = 'btn btn-ghost';
+  } else {
+    dmsTab.className = 'btn btn-ghost';
+    qcTab.className = 'btn btn-teal';
+  }
+  dmsPnl.style.display = module === 'dms' ? '' : 'none';
+  qcPnl.style.display = module === 'qc' ? '' : 'none';
+  if(module === 'dms') renderWorkflowConfigView();
+  if(module === 'qc') renderQcWorkflowConfigView();
+}
+
+// --- QC Workflow Configuration (parallel to DMS but keyed by QC Categories) ---
+// Uses a separate Firestore collection `qcWorkflowConfigSteps` so QC
+// workflows are independent of DMS document workflows.
+let qcWorkflowConfigStepsData = [];
+let activeQcWorkflowCategory = null; // null = list; string = detail
+
+function listenQcWorkflowConfigs(){
+  const unsub = db.collection('qcWorkflowConfigSteps').onSnapshot(snap => {
+    qcWorkflowConfigStepsData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(currentUser && currentUser.role === 'admin' && activeWfModule === 'qc') renderQcWorkflowConfigView();
+  }, err => console.error('qcWorkflowConfigSteps listener:', err));
+  activeSessionUnsubs.push(unsub);
+}
+
+function renderQcWorkflowConfigView(){
+  const panel = document.getElementById('qcWorkflowConfigPanel');
+  if(!panel) return;
+  if(activeQcWorkflowCategory !== null) renderQcWorkflowConfigDetail(panel);
+  else renderQcWorkflowConfigList(panel);
+}
+
+function renderQcWorkflowConfigList(panel){
+  const categories = mastersData.qcCategoryMasters.filter(c => !c.parentId);
+  const rows = [{ category: '', displayName: 'Default', isDefault: true }, ...categories.map(c => ({ category: c.name, displayName: c.name, isDefault: false }))]
+    .map(row => {
+      const stepCount = qcWorkflowConfigStepsData.filter(s => s.category === row.category).length;
+      return `<tr onclick="openQcWorkflowConfigDetail('${escapeJs(row.category)}')">
+        <td>${escapeHtml(row.displayName)}${row.isDefault ? ' <span style="color:var(--text-muted); font-weight:400;">(any QC category without its own workflow)</span>' : ''}</td>
+        <td>${stepCount} step${stepCount === 1 ? '' : 's'}</td>
+        <td style="text-align:right;"><button class="icon-btn-sm" onclick="event.stopPropagation(); openQcWorkflowConfigDetail('${escapeJs(row.category)}')" title="Configure">&#9999;&#65039;</button></td>
+      </tr>`;
+    }).join('');
+  panel.innerHTML = `<table><thead><tr><th>QC Category</th><th>Steps</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="auth-hint" style="margin-top:14px;">Categories come from <b>Manage QC Categories</b> — add one there and it shows up here automatically.</div>`;
+}
+
+function renderQcWorkflowConfigDetail(panel){
+  const category = activeQcWorkflowCategory;
+  const isDefault = category === '';
+  const displayName = isDefault ? 'Default QC Workflow' : category;
+  const allStatusOptions = getAllStatusOptions();
+  const stepsRaw = qcWorkflowConfigStepsData.filter(s => s.category === category);
+  const chainResult = computeStatusChain(stepsRaw);
+
+  let tableOrWarning;
+  if(stepsRaw.length === 0){
+    tableOrWarning = `<div class="master-empty">No steps yet — add at least one below.</div>`;
+  } else if(!chainResult.ok){
+    tableOrWarning = `<div class="auth-error" style="display:block; margin-bottom:16px;">${escapeHtml(chainResult.error)}</div>
+      <table><thead><tr><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>
+        ${stepsRaw.map(s => `<tr>
+          <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}</td>
+          <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
+          <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
+          <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeQcWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  } else {
+    const rows = chainResult.staged.map(s => {
+      const parallelCount = chainResult.staged.filter(x => x.stage === s.stage).length;
+      const parallelBadge = parallelCount > 1 ? '<span class="step-chip approved" style="margin-left:8px;">&Vert; Parallel</span>' : '';
+      return `<tr>
+        <td><span class="drawing-code">${s.stage + 1}</span></td>
+        <td>${escapeHtml(ROLE_LABELS[s.role] || s.role)}${parallelBadge}</td>
+        <td>${escapeHtml(allStatusOptions[s.fromStatus] || s.fromStatus || '—')}</td>
+        <td>${escapeHtml(allStatusOptions[s.toStatus] || s.toStatus || '—')}</td>
+        <td style="text-align:right;"><button class="icon-btn-sm" onclick="removeQcWorkflowConfigStep('${s.id}')" title="Delete">&#128465;&#65039;</button></td>
+      </tr>`;
+    }).join('');
+    tableOrWarning = `<table><thead><tr><th style="width:50px;">#</th><th>Role</th><th>From Status</th><th>To Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  const statusOptionsHtml = Object.entries(allStatusOptions).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('');
+  panel.innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="backToQcWorkflowList()" style="margin-bottom:16px;">&larr; Back to QC Workflows</button>
+    <h3 style="margin-bottom:3px;">${escapeHtml(displayName)}</h3>
+    <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:18px;">${isDefault ? 'Applies to any QC Category without its own steps below' : `QC Category: <b>${escapeHtml(category)}</b>`}</div>
+    ${tableOrWarning}
+    <div class="workflow-add-block" style="margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
+      <h4>Add Workflow Mapping</h4>
+      <div class="workflow-add-row">
+        <select id="qcNewStepRole">
+          <option value="">Role&hellip;</option>
+          ${Object.entries(ROLE_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
+        </select>
+        <select id="qcNewStepFromStatus"><option value="">From Status&hellip;</option>${statusOptionsHtml}</select>
+        <select id="qcNewStepToStatus"><option value="">To Status&hellip;</option>${statusOptionsHtml}</select>
+        <button class="btn btn-teal btn-sm" onclick="addQcWorkflowConfigStep()">+ Add Mapping</button>
+      </div>
+      <div class="auth-hint" style="margin-top:10px;">The sequence is worked out automatically by matching each step's To Status to the next step's From Status. Steps sharing a From Status run in parallel.</div>
+    </div>
+  `;
+}
+
+function openQcWorkflowConfigDetail(category){
+  activeQcWorkflowCategory = category;
+  renderQcWorkflowConfigView();
+}
+function backToQcWorkflowList(){
+  activeQcWorkflowCategory = null;
+  renderQcWorkflowConfigView();
+}
+function addQcWorkflowConfigStep(){
+  const category = activeQcWorkflowCategory;
+  const role = document.getElementById('qcNewStepRole').value;
+  const fromStatus = document.getElementById('qcNewStepFromStatus').value;
+  const toStatus = document.getElementById('qcNewStepToStatus').value;
+  if(!role){ toast('Please choose a role.', 'err'); return; }
+  if(!fromStatus || !toStatus){ toast('Please choose both From Status and To Status.', 'err'); return; }
+  if(fromStatus === toStatus){ toast('From Status and To Status can\'t be the same.', 'err'); return; }
+  const existingSteps = qcWorkflowConfigStepsData.filter(s => s.category === category);
+  if(existingSteps.some(s => s.role === role && s.fromStatus === fromStatus && s.toStatus === toStatus)){ toast('An identical mapping already exists.', 'err'); return; }
+  const conflicting = existingSteps.find(s => s.fromStatus === fromStatus && s.toStatus !== toStatus);
+  if(conflicting){ toast('Another step from this status leads to a different next status — parallel steps at the same point must lead to the same next status.', 'err'); return; }
+  db.collection('qcWorkflowConfigSteps').add({
+    category, label: ROLE_LABELS[role] || role, role, fromStatus, toStatus,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(() => toast('Mapping added.', 'ok'))
+    .catch(err => toast('Could not add: ' + err.message, 'err'));
+}
+function removeQcWorkflowConfigStep(stepId){
+  const step = qcWorkflowConfigStepsData.find(s => s.id === stepId);
+  if(!step) return;
+  const categorySteps = qcWorkflowConfigStepsData.filter(s => s.category === step.category);
+  if(step.category === '' && categorySteps.length <= 1){ toast('The Default QC workflow needs at least one step.', 'err'); return; }
+  if(!confirm(`Are you sure you want to remove this workflow mapping?\n\n"${ROLE_LABELS[step.role] || step.role}"`)) return;
+  db.collection('qcWorkflowConfigSteps').doc(stepId).delete()
+    .then(() => toast('Mapping removed.', 'ok'))
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
 }
 
 /* ============================================================
@@ -2757,6 +2913,14 @@ function applyPageAccessToNav(){
 function populateUaUserSelect(){
   const sel = document.getElementById('uaUserSelect');
   if(!sel) return;
+  // If usersData hasn't arrived from the listener yet, fetch directly
+  if(usersData.length === 0){
+    db.collection('users').orderBy('name').get().then(snap => {
+      usersData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      populateUaUserSelect(); // retry now that we have data
+    }).catch(err => console.error('populateUaUserSelect direct fetch:', err));
+    return;
+  }
   const prevValue = sel.value;
   const nonAdmins = usersData.filter(u => u.role !== 'admin');
   sel.innerHTML = '<option value="">Select a user&hellip;</option>' +
@@ -2882,6 +3046,7 @@ function startListeners(){
   listenAllDocuments();
   listenNotifications();
   listenWorkflowConfigs();
+  listenQcWorkflowConfigs();
   listenStatusLabels();
   listenRoleMasters();
   listenQcObservations();
@@ -2911,6 +3076,9 @@ function stopSessionListeners(){
   editingRoleId = null;
   workflowConfigStepsData = [];
   activeWorkflowCategory = null;
+  qcWorkflowConfigStepsData = [];
+  activeQcWorkflowCategory = null;
+  activeWfModule = 'dms';
   customStatusesData = [];
   editingCustomStatusId = null;
   qcObservationsData = [];
