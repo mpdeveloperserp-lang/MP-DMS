@@ -559,7 +559,7 @@ function submitResubmission(){
             versionNo: newVersionNo, revision, fileName: resubFile.name, fileURL: url, filePath: storagePath,
             uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: ts,
             status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
-            workflowConfigId: resolved.configId, workflowConfigName: resolved.configName,
+            workflowConfigName: resolved.configName,
             signedBy: null, signedAt: null, supersededBy: null,
             docTitle: docData.title, docDrawingNumber: docData.drawingNumber, docProject: docData.project, docId: activeDocId
           };
