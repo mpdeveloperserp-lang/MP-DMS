@@ -1673,6 +1673,9 @@ function handleUpload(ev){
           signedBy: null, signedAt: null, supersededBy: null,
           docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
         };
+        const historyRef = db.collection('documents').doc(docRef.id)
+          .collection('versions').doc(versionRef.id)
+          .collection('history').doc();
         const batch = db.batch();
         batch.set(docRef, {
           title: meta.title, drawingNumber: meta.drawingNumber, project: meta.project,
@@ -1682,7 +1685,7 @@ function handleUpload(ev){
           createdAt: now, updatedAt: now
         });
         batch.set(versionRef, versionData);
-        batch.set(versionRef.collection('history').doc(), {
+        batch.set(historyRef, {
           action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
           timestamp: now, remarks: null, toStatus:'pending_review'
         });
@@ -1696,6 +1699,9 @@ function handleUpload(ev){
           switchView('queueView');
           document.querySelector('.nav-item[data-view="queueView"]').classList.add('active');
           document.querySelector('.nav-item[data-view="uploadView"]').classList.remove('active');
+        }).catch(err => {
+          toast('Upload failed to save: ' + err.message, 'err');
+          btn.disabled = false; btn.textContent = 'Submit for Review';
         });
       });
     }
