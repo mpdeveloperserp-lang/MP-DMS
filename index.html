@@ -1662,48 +1662,63 @@ function handleUpload(ev){
       btn.disabled = false; btn.textContent = 'Submit for Review';
     },
     () => {
-      task.snapshot.ref.getDownloadURL().then(url => {
-        const now = firebase.firestore.FieldValue.serverTimestamp();
-        const versionData = {
-          versionNo: 1, revision: meta.revision,
-          fileName: selectedFile.name, fileURL: url, filePath: storagePath,
-          uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
-          status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
-          workflowConfigId: resolved.configId, workflowConfigName: resolved.configName,
-          signedBy: null, signedAt: null, supersededBy: null,
-          docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
-        };
-        const historyRef = db.collection('documents').doc(docRef.id)
-          .collection('versions').doc(versionRef.id)
-          .collection('history').doc();
-        const batch = db.batch();
-        batch.set(docRef, {
-          title: meta.title, drawingNumber: meta.drawingNumber, project: meta.project,
-          department: meta.department, category: meta.category,
-          currentVersionNo: 1, currentVersionId: versionRef.id, status: 'pending_review',
-          createdBy: currentUser.uid, createdByName: currentUser.name,
-          createdAt: now, updatedAt: now
-        });
-        batch.set(versionRef, versionData);
-        batch.set(historyRef, {
-          action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
-          timestamp: now, remarks: null, toStatus:'pending_review'
-        });
-        batch.commit().then(() => {
-          const stage0Roles = resolved.steps.filter(s => s.stage === 0).map(s => s.role);
-          notifyRoles(stage0Roles,
-            `${meta.drawingNumber} — ${meta.title} needs your review.`, docRef.id);
-          toast('Document uploaded and sent for review.', 'ok');
-          document.getElementById('uploadForm').reset();
-          resetUploadForm();
-          switchView('queueView');
-          document.querySelector('.nav-item[data-view="queueView"]').classList.add('active');
-          document.querySelector('.nav-item[data-view="uploadView"]').classList.remove('active');
-        }).catch(err => {
-          toast('Upload failed to save: ' + err.message, 'err');
+      console.log('Storage upload complete — building Firestore record...');
+      // Use the upload snapshot directly rather than calling getDownloadURL()
+      // which makes an additional HTTP round-trip that can hang in some
+      // CORS/network configurations. The download URL can be constructed
+      // from the storage path and Firebase project bucket.
+      const bucket = task.snapshot.ref.bucket;
+      const encodedPath = encodeURIComponent(storagePath);
+      const downloadURL = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
+      console.log('Download URL constructed, writing to Firestore...');
+      try {
+          const now = firebase.firestore.FieldValue.serverTimestamp();
+          const versionData = {
+            versionNo: 1, revision: meta.revision,
+            fileName: selectedFile.name, fileURL: downloadURL, filePath: storagePath,
+            uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
+            status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
+            workflowConfigId: resolved.configId, workflowConfigName: resolved.configName,
+            signedBy: null, signedAt: null, supersededBy: null,
+            docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
+          };
+          const historyRef = db.collection('documents').doc(docRef.id)
+            .collection('versions').doc(versionRef.id)
+            .collection('history').doc();
+          const batch = db.batch();
+          batch.set(docRef, {
+            title: meta.title, drawingNumber: meta.drawingNumber, project: meta.project,
+            department: meta.department, category: meta.category,
+            currentVersionNo: 1, currentVersionId: versionRef.id, status: 'pending_review',
+            createdBy: currentUser.uid, createdByName: currentUser.name,
+            createdAt: now, updatedAt: now
+          });
+          batch.set(versionRef, versionData);
+          batch.set(historyRef, {
+            action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
+            timestamp: now, remarks: null, toStatus:'pending_review'
+          });
+          batch.commit().then(() => {
+            console.log('Firestore batch committed successfully');
+            const stage0Roles = resolved.steps.filter(s => s.stage === 0).map(s => s.role);
+            notifyRoles(stage0Roles,
+              `${meta.drawingNumber} — ${meta.title} needs your review.`, docRef.id);
+            toast('Document uploaded and sent for review.', 'ok');
+            document.getElementById('uploadForm').reset();
+            resetUploadForm();
+            switchView('queueView');
+            document.querySelector('.nav-item[data-view="queueView"]').classList.add('active');
+            document.querySelector('.nav-item[data-view="uploadView"]').classList.remove('active');
+          }).catch(err => {
+            console.error('batch.commit failed:', err.code, err.message);
+            toast('Upload failed to save: ' + err.message, 'err');
+            btn.disabled = false; btn.textContent = 'Submit for Review';
+          });
+        } catch(syncErr) {
+          console.error('Upload sync error after storage:', syncErr);
+          toast('Upload error: ' + syncErr.message, 'err');
           btn.disabled = false; btn.textContent = 'Submit for Review';
-        });
-      });
+        }
     }
   );
   return false;
