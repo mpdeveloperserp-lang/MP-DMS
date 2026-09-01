@@ -1137,6 +1137,18 @@
   </div>
 </div>
 
+<!-- ---------------- DOCUMENT SUBMITTED SUCCESS MODAL ---------------- -->
+<div class="modal-overlay" id="docSubmittedModalOverlay" style="z-index:9999;">
+  <div class="modal" style="max-width:420px; text-align:center;">
+    <div class="modal-body" style="padding:36px 32px 24px;">
+      <div style="font-size:52px; margin-bottom:16px;">&#9989;</div>
+      <h2 style="margin:0 0 10px; font-size:22px; color:var(--navy);">Document Submitted!</h2>
+      <div id="docSubmittedDetails" style="font-size:14px; color:var(--text-muted); margin-bottom:24px;"></div>
+      <button class="btn btn-teal" style="width:100%; padding:12px;" onclick="closeDocSubmittedModal()">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- ---------------- EDIT GOOD WORK MODAL ---------------- -->
 <div class="modal-overlay" id="editGoodWorkModalOverlay">
   <div class="modal">
@@ -1626,6 +1638,10 @@ function resetUploadForm(){
   document.getElementById('progressWrap').style.display = 'none';
   document.getElementById('progressBar').style.width = '0%';
 }
+function closeDocSubmittedModal(){
+  closeModal('docSubmittedModalOverlay');
+  switchView('docsView');
+}
 
 function handleUpload(ev){
   ev.preventDefault();
@@ -1703,12 +1719,12 @@ function handleUpload(ev){
             const stage0Roles = resolved.steps.filter(s => s.stage === 0).map(s => s.role);
             notifyRoles(stage0Roles,
               `${meta.drawingNumber} — ${meta.title} needs your review.`, docRef.id);
-            toast('Document uploaded and sent for review.', 'ok');
             document.getElementById('uploadForm').reset();
             resetUploadForm();
-            switchView('queueView');
-            document.querySelector('.nav-item[data-view="queueView"]').classList.add('active');
-            document.querySelector('.nav-item[data-view="uploadView"]').classList.remove('active');
+            // Show success popup
+            document.getElementById('docSubmittedDetails').innerHTML =
+              `<b>${escapeHtml(meta.title)}</b><br>Drawing No: ${escapeHtml(meta.drawingNumber)}<br>Workflow: ${escapeHtml(resolved.configName)} (${resolved.steps.length} step${resolved.steps.length===1?'':'s'})`;
+            openModal('docSubmittedModalOverlay');
           }).catch(err => {
             console.error('batch.commit failed:', err.code, err.message);
             toast('Upload failed to save: ' + err.message, 'err');
