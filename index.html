@@ -1678,7 +1678,7 @@ function handleUpload(ev){
             fileName: selectedFile.name, fileURL: downloadURL, filePath: storagePath,
             uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
             status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
-            workflowConfigId: resolved.configId, workflowConfigName: resolved.configName,
+            workflowConfigName: resolved.configName,
             signedBy: null, signedAt: null, supersededBy: null,
             docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
           };
