@@ -1085,9 +1085,9 @@
 </div>
 
 <!-- ---------------- CREATE USER MODAL (admin only) ---------------- -->
-<div class="modal-overlay" id="createUserModalOverlay">
+<div class="modal-overlay" id="createUserModalOverlay" data-protected="true">
   <div class="modal">
-    <div class="modal-head"><h3>Create User</h3><button class="modal-close" onclick="closeModal('createUserModalOverlay')">&times;</button></div>
+    <div class="modal-head"><h3>Create User</h3><button class="modal-close" onclick="closeCreateUserModal()">&times;</button></div>
     <div class="modal-body">
       <div class="field"><label>Full name</label><input type="text" id="newUserName"></div>
       <div class="field"><label>Email</label><input type="email" id="newUserEmail" autocomplete="off"></div>
@@ -1116,7 +1116,7 @@
       <div class="auth-hint" style="margin-top:0;">Share the email and temporary password with them directly &mdash; there's no automated invite email in this build. They can sign in right away.</div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeModal('createUserModalOverlay')">Cancel</button>
+      <button class="btn btn-ghost" onclick="closeCreateUserModal()">Cancel</button>
       <button class="btn btn-teal" id="createUserConfirmBtn" onclick="submitCreateUser()">Create User</button>
     </div>
   </div>
@@ -1607,8 +1607,47 @@ function toast(msg, type){
 /* ============================================================
    MODALS
 ============================================================ */
-function openModal(id){ document.getElementById(id).classList.add('active'); }
-function closeModal(id){ document.getElementById(id).classList.remove('active'); }
+function openModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.add('active');
+  // Intercept backdrop click — protected modals validate before closing,
+  // others close normally.
+  el._backdropHandler = function(e){
+    if(e.target !== el) return;
+    if(el.dataset.protected === 'true'){
+      // Highlight any unfilled required fields instead of closing
+      const missing = el.querySelectorAll('input[required], select[required]');
+      let anyEmpty = false;
+      missing.forEach(inp => {
+        if(!inp.value.trim()){
+          inp.style.borderColor = 'var(--red)';
+          inp.addEventListener('input', () => inp.style.borderColor = '', { once: true });
+          anyEmpty = true;
+        }
+      });
+      if(anyEmpty){ toast('Please fill in all required fields before closing.', 'err'); return; }
+    }
+    closeModal(id);
+  };
+  el.addEventListener('click', el._backdropHandler);
+}
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('active');
+  if(el._backdropHandler){ el.removeEventListener('click', el._backdropHandler); delete el._backdropHandler; }
+}
+// Validated close for Create User — warns if mandatory fields are filled
+// but lets the user deliberately cancel with a confirm if they want to discard
+function closeCreateUserModal(){
+  const name = document.getElementById('newUserName').value.trim();
+  const email = document.getElementById('newUserEmail').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const hasData = name || email || password;
+  if(hasData && !confirm('You have unsaved information. Are you sure you want to cancel?')) return;
+  closeModal('createUserModalOverlay');
+}
 document.querySelectorAll('.modal-overlay').forEach(ov => {
   ov.addEventListener('click', e => { if(e.target===ov) ov.classList.remove('active'); });
 });
