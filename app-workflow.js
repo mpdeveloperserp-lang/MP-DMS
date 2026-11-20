@@ -168,19 +168,43 @@ document.addEventListener('click', e => {
    MY APPROVAL QUEUE
 ============================================================ */
 let queueMap = new Map();
+// Files waiting for review/approval. Watches top-level documents whose status
+// is pending (indexed automatically by Firestore, so no manual index is needed),
+// then watches each one's CURRENT version for its workflow steps.
+// queueMap is keyed by version ID.
+const PENDING_STATUSES = ['pending_review', 'pending_approval'];
 function listenQueue(){
-  const unsub = db.collectionGroup('versions').where('status','in',['pending_review','pending_approval'])
-    .onSnapshot(snap => {
-      snap.docChanges().forEach(ch => {
-        if(ch.type === 'removed') queueMap.delete(ch.doc.id);
-        else queueMap.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() });
-      });
-      renderQueue();
-    }, err => {
-      console.error('queue listener:', err);
-      toast('Could not load files waiting for review/approval: ' + err.message, 'err');
+  const versionWatchers = new Map(); // "docId/versionId" -> { unsub, versionId }
+  const unsub = db.collection('documents').where('status', 'in', PENDING_STATUSES).onSnapshot(snap => {
+    const live = new Set();
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if(!data.currentVersionId) return;
+      const key = d.id + '/' + data.currentVersionId;
+      live.add(key);
+      if(versionWatchers.has(key)) return;
+      const vUnsub = db.collection('documents').doc(d.id).collection('versions').doc(data.currentVersionId).onSnapshot(vs => {
+        const v = vs.exists ? vs.data() : null;
+        if(v && PENDING_STATUSES.includes(v.status)) queueMap.set(vs.id, { id: vs.id, docId: d.id, ...v });
+        else queueMap.delete(vs.id);
+        renderQueue();
+      }, err => console.error('queue version listener:', err));
+      versionWatchers.set(key, { unsub: vUnsub, versionId: data.currentVersionId });
     });
-  activeSessionUnsubs.push(unsub);
+    // Stop watching versions that are no longer pending (approved, rejected, superseded)
+    for(const [key, w] of versionWatchers){
+      if(!live.has(key)){ try{ w.unsub(); }catch(e){} versionWatchers.delete(key); queueMap.delete(w.versionId); }
+    }
+    renderQueue();
+  }, err => {
+    console.error('queue listener:', err);
+    toast('Could not load files waiting for review/approval: ' + err.message, 'err');
+  });
+  activeSessionUnsubs.push(() => {
+    unsub();
+    versionWatchers.forEach(w => { try{ w.unsub(); }catch(e){} });
+    versionWatchers.clear();
+  });
 }
 // The approval queue now lives on the Files dashboard (Knowledge Management)
 // in app-files.js. This only works out how many items wait on the current
