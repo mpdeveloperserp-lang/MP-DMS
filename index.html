@@ -155,6 +155,11 @@
   .view.active{display:block;}
   .view-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:10px;}
   .view-head h2{font-size:21px;}
+  .picker-bar{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:12px 0 16px; padding:14px 18px;}
+  .picker-bar label{font-size:13px; font-weight:600; color:var(--text); min-width:120px;}
+  .picker-bar select{width:340px; max-width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:7px; font-size:13px; background:#fff;}
+  .subview-empty{font-size:13px; color:var(--text-muted); padding:30px 4px;}
+  .view .view > .view-head h2{font-size:17px;}
   .view-sub{color:var(--text-muted); font-size:13px; margin:4px 0 22px;}
 
   .stat-row{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;}
@@ -378,6 +383,8 @@
   .fm-node:hover{background:#F1F4F9;}
   .fm-node.active{background:var(--gold-soft); color:var(--gold); font-weight:600;}
   .fm-node.dim{color:var(--text-muted);}
+  .fm-special{font-weight:600; color:var(--navy); border-bottom:1px solid var(--border);}
+  .fm-special-ic{width:18px; text-align:center; flex:none;}
   .fm-node-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .fm-caret{width:14px; flex:none; font-size:10px; color:var(--text-muted); text-align:center;}
   .fm-ficon{width:18px; height:14px; flex:none;}
@@ -421,6 +428,7 @@
   .fm-actions-links .sep{color:var(--border);}
   .fm-tag{display:inline-block; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:10px;}
   .fm-tag.open{background:var(--teal-soft); color:var(--teal);}
+  .fm-tag.project{background:#EAF1FB; color:var(--navy-soft);}
   .fm-tag.restricted{background:var(--red-soft); color:var(--red);}
   .fm-subhead{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700; margin:20px 0 9px;}
   .fm-sub-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px;}
@@ -493,29 +501,14 @@
   <div class="sidebar">
     <div class="nav-group-label">Document Management</div>
     <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files</button>
-    <button class="nav-item" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
-    <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
     <button class="nav-item" data-view="defaultDirView" onclick="switchView('defaultDirView')"><span class="ic">&#127968;</span> Default Directory</button>
     <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
     <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
     <button class="nav-item hidden" id="adminUsersNavBtn" data-view="usersView" onclick="switchView('usersView')"><span class="ic">&#128101;</span> Manage Users</button>
-    <div class="nav-group-label hidden" id="adminMasterDataGroup" style="margin-top:10px;">Master Data</div>
-    <button class="nav-item hidden admin-master-nav" data-view="projectsMasterView" onclick="switchView('projectsMasterView')"><span class="ic">&#127959;</span> Manage Projects</button>
-    <button class="nav-item hidden admin-master-nav" data-view="departmentsMasterView" onclick="switchView('departmentsMasterView')"><span class="ic">&#127970;</span> Manage Departments</button>
-    <button class="nav-item hidden admin-master-nav" data-view="categoriesMasterView" onclick="switchView('categoriesMasterView')"><span class="ic">&#128193;</span> Manage Document Categories</button>
-    <button class="nav-item hidden admin-master-nav" data-view="rolesMasterView" onclick="switchView('rolesMasterView')"><span class="ic">&#128737;</span> Manage Roles</button>
-    <div class="nav-group-label hidden" id="adminConfigGroup" style="margin-top:10px;">Configuration</div>
-    <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
-    <button class="nav-item hidden" id="adminStatusNavBtn" data-view="statusConfigView" onclick="switchView('statusConfigView')"><span class="ic">&#127991;</span> Status Labels</button>
-    <button class="nav-item hidden" id="adminUserAccessNavBtn" data-view="userAccessView" onclick="switchView('userAccessView')"><span class="ic">&#128101;</span> User Access</button>
-    <div class="nav-group-label hidden admin-master-nav" style="margin-top:10px;">File Manager Setup</div>
-    <button class="nav-item hidden admin-master-nav" data-view="rootFolderView" onclick="switchView('rootFolderView')"><span class="ic">&#128193;</span> Root Folder</button>
-    <button class="nav-item hidden admin-master-nav" data-view="setParamView" onclick="switchView('setParamView')"><span class="ic">&#9881;</span> Set Parameter</button>
-    <button class="nav-item hidden admin-master-nav" data-view="emailConfigView" onclick="switchView('emailConfigView')"><span class="ic">&#9993;</span> Email Configuration</button>
-    <button class="nav-item hidden admin-master-nav" data-view="moveFilesView" onclick="switchView('moveFilesView')"><span class="ic">&#8644;</span> Move File Location</button>
-    <button class="nav-item hidden admin-master-nav" data-view="transferRightsView" onclick="switchView('transferRightsView')"><span class="ic">&#8646;</span> Transfer Rights</button>
+    <button class="nav-item hidden admin-master-nav" data-view="mastersView" onclick="switchView('mastersView')"><span class="ic">&#128451;</span> Masters</button>
+    <button class="nav-item hidden admin-master-nav" data-view="configView" onclick="switchView('configView')"><span class="ic">&#9881;</span> Configurations</button>
   </div>
 
   <div class="main">
@@ -526,6 +519,7 @@
       <div class="fm-wrap">
         <div class="fm-tree-pane">
           <div class="fm-tree-head"><input type="text" id="fmTreeSearch" placeholder="Search folders&hellip;" oninput="onFmTreeFilter(this.value)"></div>
+          <div class="fm-node fm-special" id="fmAllDocsNode" onclick="openFmAllDocs()"><span class="fm-caret"></span><span class="fm-special-ic">&#128196;</span><span class="fm-node-name">All Documents</span></div>
           <div class="fm-tree-title"><span>Default Directory</span><button class="fm-link" onclick="openFmDashboard()">Home</button></div>
           <div class="fm-tree" id="fmTree"><div class="master-empty">Loading&hellip;</div></div>
         </div>
@@ -541,56 +535,55 @@
           </div>
           <div class="fm-pop hidden" id="fmLinksPanel"></div>
           <div id="fmMain"></div>
+          <!-- All Documents (formerly the separate Documents page) -->
+          <div id="fmDocsPanel" class="hidden">
+            <div class="fm-section-head">
+              <h3>All Documents</h3>
+              <button class="fm-link" onclick="openFmDashboard()">&larr; Back</button>
+            </div>
+            <div class="fm-meta" style="margin-bottom:12px;">Every document you can access, across all folders. Click a row to open its approval timeline.</div>
+            <div class="doc-filter-row" style="margin-bottom:14px;">
+              <div class="field" style="margin-bottom:0; min-width:220px;"><label>Folder</label><select id="filterFolder" onchange="applyDocFilters()"><option value="">All folders</option></select></div>
+              <div class="field" style="margin-bottom:0;"><label>Project</label><select id="filterProject" onchange="applyDocFilters()"><option value="">All projects</option></select></div>
+              <div class="field" style="margin-bottom:0;"><label>Department</label><select id="filterDepartment" onchange="applyDocFilters()"><option value="">All departments</option></select></div>
+              <div class="field" style="margin-bottom:0;"><label>Document Category</label><select id="filterCategory" onchange="applyDocFilters()"><option value="">All document categories</option></select></div>
+              <div class="field" style="margin-bottom:0;"><label>Status</label><select id="filterStatus" onchange="applyDocFilters()"><option value="">All statuses</option></select></div>
+              <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearDocFilters()">Clear filters</button>
+            </div>
+            <table class="fm-table">
+              <thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
+              <tbody id="docsTableBody">
+                <tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
+              </tbody>
+            </table>
+            <div class="fm-empty-note hidden" id="docsLimitNote">Showing the 100 most recently updated documents. Use Search or Advanced Search to find older ones.</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="view" id="uploadView">
-      <div class="view-head"><h2>Upload Document</h2></div>
-      <div class="view-sub" id="uploadSub">Files go into a folder. If the folder has reviewers/approvers (folder Properties) they review it; otherwise the Document Category workflow applies.</div>
-      <div class="card panel">
-        <form id="uploadForm" onsubmit="return handleUpload(event)">
-          <div class="upload-grid">
-            <div class="field full">
-              <label>File</label>
-              <label class="dropzone" id="dropzone" for="fileInput">
-                <div id="dzText"><strong>Click to choose a file</strong> or drag and drop &mdash; PDF, DWG, image, or Office file</div>
-                <div id="filePillWrap"></div>
-              </label>
-              <input type="file" id="fileInput" class="hidden">
-            </div>
-            <div class="field full"><label>Folder</label>
-              <select id="fFolder" required onchange="updateUploadWorkflowHint()">
-                <option value="">Select folder&hellip;</option>
-              </select>
-            </div>
-            <div class="field"><label>Project</label>
-              <select id="fProject" required>
-                <option value="">Select project&hellip;</option>
-              </select>
-            </div>
-            <div class="field"><label>Department</label>
-              <select id="fDepartment" required>
-                <option value="">Select department&hellip;</option>
-              </select>
-            </div>
-            <div class="field"><label>Document Category</label>
-              <select id="fCategory" required onchange="updateUploadWorkflowHint()">
-                <option value="">Select document category&hellip;</option>
-              </select>
-              <div class="auth-hint" id="uploadWorkflowHint" style="margin-top:6px;"></div>
-            </div>
-            <div class="field"><label>Drawing / Document No.</label><input type="text" id="fDrawingNo" placeholder="e.g., STR-FDN-003" required></div>
-            <div class="field"><label>Revision</label><input type="text" id="fRevision" placeholder="e.g., Rev-A" required></div>
-            <div class="field full"><label>Title</label><input type="text" id="fTitle" placeholder="e.g., Foundation Plan &ndash; Tower B" required></div>
-            <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
-            <div class="full" style="display:flex; gap:10px; margin-top:4px;">
-              <button class="btn btn-teal" type="submit" id="uploadBtn">Submit for Review</button>
-              <button class="btn btn-ghost" type="reset" onclick="resetUploadForm()">Clear</button>
-            </div>
-          </div>
-        </form>
+    <!-- ---------------- MASTERS (one page, pick a master table) ---------------- -->
+    <div class="view" id="mastersView">
+      <div class="view-head"><h2>Master Tables</h2></div>
+      <div class="card panel picker-bar">
+        <label for="mastersPicker">Master Table <span style="color:var(--red);">*</span></label>
+        <select id="mastersPicker" onchange="goSubView('mastersView')"></select>
+        <button class="btn btn-primary btn-sm" style="width:auto;" onclick="goSubView('mastersView')">Go</button>
       </div>
+      <div class="subview-empty" id="mastersEmpty">Select a master table to view and edit its data.</div>
+      <div id="mastersHost"></div>
+    </div>
+
+    <!-- ---------------- CONFIGURATIONS (one page, pick a configuration) ---------------- -->
+    <div class="view" id="configView">
+      <div class="view-head"><h2>Configurations</h2></div>
+      <div class="card panel picker-bar">
+        <label for="configPicker">Configuration <span style="color:var(--red);">*</span></label>
+        <select id="configPicker" onchange="goSubView('configView')"></select>
+        <button class="btn btn-primary btn-sm" style="width:auto;" onclick="goSubView('configView')">Go</button>
+      </div>
+      <div class="subview-empty" id="configEmpty">Select a configuration to open it.</div>
+      <div id="configHost"></div>
     </div>
 
     <!-- ---------------- QUEUE VIEW ---------------- -->
@@ -600,29 +593,6 @@
       <div class="stat-row" id="queueStats"></div>
       <div class="queue-list" id="queueList">
         <div class="empty-state"><div class="ic">&#8987;</div><b>Loading&hellip;</b></div>
-      </div>
-    </div>
-
-    <!-- ---------------- DOCUMENTS VIEW ---------------- -->
-    <div class="view" id="docsView">
-      <div class="view-head"><h2>Documents</h2></div>
-      <div class="view-sub">Every document submitted into the lifecycle. Click a row to open its approval timeline.</div>
-      <div class="card panel" style="margin-bottom:16px;">
-        <div class="doc-filter-row">
-          <div class="field" style="margin-bottom:0;"><label>Project</label><select id="filterProject" onchange="applyDocFilters()"><option value="">All projects</option></select></div>
-          <div class="field" style="margin-bottom:0;"><label>Department</label><select id="filterDepartment" onchange="applyDocFilters()"><option value="">All departments</option></select></div>
-          <div class="field" style="margin-bottom:0;"><label>Document Category</label><select id="filterCategory" onchange="applyDocFilters()"><option value="">All document categories</option></select></div>
-          <div class="field" style="margin-bottom:0;"><label>Status</label><select id="filterStatus" onchange="applyDocFilters()"><option value="">All statuses</option></select></div>
-          <button class="btn btn-ghost btn-sm" style="align-self:flex-end;" onclick="clearDocFilters()">Clear filters</button>
-        </div>
-      </div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
-          <tbody id="docsTableBody">
-            <tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
-          </tbody>
-        </table>
       </div>
     </div>
 
@@ -674,7 +644,7 @@
     <!-- ---------------- ROOT FOLDER VIEW (admin) ---------------- -->
     <div class="view" id="rootFolderView">
       <div class="view-head"><h2>Root Folder</h2><button class="btn btn-orange" onclick="openCreateFolderModal(null)">+ Create Root Folder</button></div>
-      <div class="view-sub">Top-level folders of the file tree. Open one to add subfolders, set its reviewers/approvers (Properties) and who can see it (Permissions). A folder can only be deleted once it has no subfolders or files.</div>
+      <div class="view-sub">Top-level folders of the file tree. <b>Every project in Masters &rarr; Project Master gets its folder automatically</b> (sub-items such as towers become subfolders); create other root folders here. Open one to add subfolders, set its reviewers/approvers (Properties) and who can see it (Permissions). A folder can only be deleted once it has no subfolders or files.</div>
       <div class="card">
         <table>
           <thead><tr><th>Folder No.</th><th>Name</th><th>Subfolders</th><th>Access</th><th>Created By</th><th></th></tr></thead>
@@ -788,7 +758,7 @@
     <!-- ---------------- MANAGE PROJECTS VIEW (admin only) ---------------- -->
     <div class="view" id="projectsMasterView">
       <div class="view-head"><h2>Manage Projects</h2><button class="btn btn-teal" onclick="openCreateMasterModal('projectMasters')">+ Create Project</button></div>
-      <div class="view-sub">Feeds the Project dropdown on Upload and the Documents filter. Click an entry to expand and add sub-items (e.g. towers/blocks) under it. Entries in use by an existing document can't be edited or deleted.</div>
+      <div class="view-sub">Feeds the Project dropdown on Upload and the document filters. <b>Each project automatically gets a folder in Files</b>, and each sub-item gets a subfolder inside it. Click an entry to expand and add sub-items (e.g. towers/blocks) under it. Entries in use by an existing document can't be edited or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="projectsMasterPanel"></div>
     </div>
 
@@ -967,7 +937,7 @@
       <div style="font-size:52px; margin-bottom:16px;">&#9989;</div>
       <h2 style="margin:0 0 10px; font-size:22px; color:var(--navy);">Document Submitted!</h2>
       <div id="docSubmittedDetails" style="font-size:14px; color:var(--text-muted); margin-bottom:24px;"></div>
-      <button class="btn btn-orange" style="width:100%; padding:12px;" onclick="closeDocSubmittedModal()">OK &mdash; open folder</button>
+      <button class="btn btn-orange" style="width:100%; padding:12px;" onclick="closeDocSubmittedModal()">OK</button>
     </div>
   </div>
 </div>
@@ -1071,7 +1041,7 @@
         <div><span>Folder Number</span><b id="fpFolderNo"></b></div>
         <div><span>Created</span><span id="fpCreated" style="display:inline; text-transform:none; letter-spacing:0; font-size:13px; color:var(--text);"></span></div>
       </div>
-      <div class="field"><label>Folder name</label><input type="text" id="fpName" maxlength="80"></div>
+      <div class="field"><label>Folder name</label><input type="text" id="fpName" maxlength="80"><div class="auth-hint" style="margin-top:5px;" id="fpNameNote"></div></div>
       <div class="field"><label>Description</label><textarea id="fpDescription" rows="2" placeholder="What belongs in this folder&hellip;"></textarea></div>
       <div class="form-section-title" style="margin-top:16px;">Reviewers <span class="fm-muted" style="text-transform:none; letter-spacing:0;">&mdash; review first; all must approve</span></div>
       <div class="dual-listbox" style="margin-bottom:16px;">
@@ -1158,6 +1128,54 @@
   </div>
 </div>
 
+<!-- ---------------- UPLOAD MODAL (opened from a folder's Upload button) ---------------- -->
+<div class="modal-overlay" id="uploadModalOverlay">
+  <div class="modal wide">
+    <div class="modal-head"><h3>Upload</h3><button class="modal-close" onclick="closeUploadModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="perm-head"><svg class="fm-ficon" viewBox="0 0 24 18" aria-hidden="true"><path d="M1 3a2 2 0 0 1 2-2h6l2 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z" fill="#4A7CC2"/></svg><span id="uploadFolderPath"></span></div>
+      <div class="auth-hint" style="margin:-6px 0 14px;" id="uploadSub">If this folder has reviewers/approvers (folder Properties) they review the file; otherwise the Document Category workflow applies.</div>
+        <form id="uploadForm" onsubmit="return handleUpload(event)">
+        <div class="upload-grid">
+          <div class="field full">
+            <label>File</label>
+            <label class="dropzone" id="dropzone" for="fileInput">
+              <div id="dzText"><strong>Click to choose a file</strong> or drag and drop &mdash; PDF, DWG, image, or Office file</div>
+              <div id="filePillWrap"></div>
+            </label>
+            <input type="file" id="fileInput" class="hidden">
+          </div>
+          <select id="fFolder" class="hidden" onchange="onUploadFolderChange()"><option value="">Select folder&hellip;</option></select>
+          <div class="field"><label>Project</label>
+            <select id="fProject" required onchange="onUploadProjectChange()">
+              <option value="">Select project&hellip;</option>
+            </select>
+          </div>
+          <div class="field"><label>Department</label>
+            <select id="fDepartment" required>
+              <option value="">Select department&hellip;</option>
+            </select>
+          </div>
+          <div class="field"><label>Document Category</label>
+            <select id="fCategory" required onchange="updateUploadWorkflowHint()">
+              <option value="">Select document category&hellip;</option>
+            </select>
+            <div class="auth-hint" id="uploadWorkflowHint" style="margin-top:6px;"></div>
+          </div>
+          <div class="field"><label>Drawing / Document No.</label><input type="text" id="fDrawingNo" placeholder="e.g., STR-FDN-003" required></div>
+          <div class="field"><label>Revision</label><input type="text" id="fRevision" placeholder="e.g., Rev-A" required></div>
+          <div class="field full"><label>Title</label><input type="text" id="fTitle" placeholder="e.g., Foundation Plan &ndash; Tower B" required></div>
+          <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+          <div class="full" style="display:flex; gap:10px; margin-top:4px;">
+            <button class="btn btn-orange" type="submit" id="uploadBtn">Upload &amp; Submit for Review</button>
+            <button class="btn btn-ghost" type="button" onclick="closeUploadModal()">Cancel</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
@@ -1221,9 +1239,8 @@ let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 // those are already gated by the existing admin-role check.
 const PAGE_ACCESS_ITEMS = [
   { key: 'filesView', label: 'Files' },
-  { key: 'uploadView', label: 'Upload Document' },
+  { key: 'uploadView', label: 'Upload (button in folders)' },
   { key: 'queueView', label: 'My Approval Queue' },
-  { key: 'docsView', label: 'Documents' },
   { key: 'defaultDirView', label: 'Default Directory' },
   { key: 'fmReportsView', label: 'Reports' },
   { key: 'alertsView', label: 'Alerts' }
@@ -1323,12 +1340,7 @@ function enterApp(){
   if(currentUser.role === 'admin'){
     document.getElementById('adminNavGroup').classList.remove('hidden');
     document.getElementById('adminUsersNavBtn').classList.remove('hidden');
-    document.getElementById('adminMasterDataGroup').classList.remove('hidden');
     document.querySelectorAll('.admin-master-nav').forEach(b => b.classList.remove('hidden'));
-    document.getElementById('adminConfigGroup').classList.remove('hidden');
-    document.getElementById('adminWorkflowNavBtn').classList.remove('hidden');
-    document.getElementById('adminStatusNavBtn').classList.remove('hidden');
-    document.getElementById('adminUserAccessNavBtn').classList.remove('hidden');
   }
   if(typeof applyPageAccessToNav === 'function') applyPageAccessToNav(); // permissive default until listenPageAccess's live data arrives
   if(typeof startListeners === 'function'){
@@ -1390,14 +1402,17 @@ function switchView(viewId, opts){
   opts = opts || {};
   if(!opts.skipAccessCheck && typeof canAccessPage === 'function' && !canAccessPage(viewId)){
     toast("You don't have access to that page.", 'err');
-    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
+    const fallback = PAGE_ACCESS_ITEMS.find(i => document.getElementById(i.key) && canAccessPage(i.key));
     viewId = fallback ? fallback.key : 'filesView';
   }
   const target = document.getElementById(viewId);
   if(!target) return;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   target.classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view===viewId));
+  const hostId = target.dataset.host || (SUBVIEW_GROUPS[viewId] ? viewId : null);
+  if(target.dataset.host) document.getElementById(target.dataset.host).classList.add('active');
+  if(hostId) syncSubViewPicker(hostId, target.dataset.host ? viewId : '');
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === viewId || (!!hostId && b.dataset.view === hostId)));
   document.getElementById('notifPanel').classList.remove('active');
   if(viewId === 'userAccessView' && typeof populateUaUserSelect === 'function') populateUaUserSelect();
   if(viewId === 'workflowConfigView' && typeof renderWorkflowConfigView === 'function') renderWorkflowConfigView();
@@ -1405,6 +1420,55 @@ function switchView(viewId, opts){
   if(!opts.skipHistory){
     history.pushState({ view: viewId }, '', '#' + viewId);
   }
+}
+
+/* ---------- Masters / Configurations: one page each, pick from a dropdown ----------
+   The individual admin pages are moved inside their host page at load, so each
+   keeps all its own behaviour; the dropdown just chooses which one is shown. */
+const SUBVIEW_GROUPS = {
+  mastersView: { picker: 'mastersPicker', host: 'mastersHost', empty: 'mastersEmpty', items: [
+    { group: null, list: [
+      ['projectsMasterView', 'Project Master'],
+      ['departmentsMasterView', 'Department Master'],
+      ['categoriesMasterView', 'Document Category Master'],
+      ['rolesMasterView', 'Role Master']
+    ]}
+  ]},
+  configView: { picker: 'configPicker', host: 'configHost', empty: 'configEmpty', items: [
+    { group: 'Workflow & Access', list: [
+      ['workflowConfigView', 'Workflow Configuration'],
+      ['statusConfigView', 'Status Labels'],
+      ['userAccessView', 'User Access']
+    ]},
+    { group: 'File Manager', list: [
+      ['rootFolderView', 'Root Folder'],
+      ['setParamView', 'Set Parameter'],
+      ['emailConfigView', 'Email Configuration'],
+      ['moveFilesView', 'Move File Location'],
+      ['transferRightsView', 'Transfer Rights']
+    ]}
+  ]}
+};
+(function initSubViews(){
+  Object.entries(SUBVIEW_GROUPS).forEach(([hostId, g]) => {
+    const host = document.getElementById(g.host);
+    const opt = ([id, label]) => `<option value="${id}">${label}</option>`;
+    document.getElementById(g.picker).innerHTML = '<option value="">[Select One]</option>' +
+      g.items.map(sec => sec.group ? `<optgroup label="${sec.group}">${sec.list.map(opt).join('')}</optgroup>` : sec.list.map(opt).join('')).join('');
+    g.items.forEach(sec => sec.list.forEach(([id]) => {
+      const el = document.getElementById(id);
+      if(el){ el.dataset.host = hostId; host.appendChild(el); }
+    }));
+  });
+})();
+function goSubView(hostId){
+  const id = document.getElementById(SUBVIEW_GROUPS[hostId].picker).value;
+  if(id) switchView(id); else switchView(hostId);
+}
+function syncSubViewPicker(hostId, subId){
+  const g = SUBVIEW_GROUPS[hostId];
+  document.getElementById(g.picker).value = subId || '';
+  document.getElementById(g.empty).classList.toggle('hidden', !!subId);
 }
 
 window.addEventListener('popstate', e => {
@@ -1501,7 +1565,7 @@ function resetUploadForm(){
 function closeDocSubmittedModal(){
   closeModal('docSubmittedModalOverlay');
   if(typeof fmLastUploadFolderId !== 'undefined' && fmLastUploadFolderId && typeof openFmFolder === 'function') openFmFolder(fmLastUploadFolderId);
-  else switchView('docsView');
+  else if(typeof openFmAllDocs === 'function') openFmAllDocs();
 }
 
 function handleUpload(ev){
@@ -1589,6 +1653,7 @@ function handleUpload(ev){
               `${meta.drawingNumber} — ${meta.title} needs your ${initialStatus === 'pending_approval' ? 'approval' : 'review'}.`, docRef.id);
             notifySubscribers(meta.folderId, `New file in ${folderPath(meta.folderId)}: ${meta.drawingNumber} — ${meta.title}`, docRef.id);
             fmLastUploadFolderId = meta.folderId;
+            closeModal('uploadModalOverlay');
             document.getElementById('uploadForm').reset();
             resetUploadForm();
             // Show success popup
