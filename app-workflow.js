@@ -168,11 +168,6 @@ document.addEventListener('click', e => {
    MY APPROVAL QUEUE
 ============================================================ */
 let queueMap = new Map();
-let queueShowOverdueOnly = false;
-function toggleOverdueOnly(){
-  queueShowOverdueOnly = !queueShowOverdueOnly;
-  renderQueue();
-}
 function listenQueue(){
   const unsub = db.collectionGroup('versions').where('status','in',['pending_review','pending_approval'])
     .onSnapshot(snap => {
@@ -183,67 +178,32 @@ function listenQueue(){
       renderQueue();
     }, err => {
       console.error('queue listener:', err);
-      document.getElementById('queueList').innerHTML =
-        `<div class="empty-state"><b>Could not load queue</b><div>${escapeHtml(err.message)}</div></div>`;
+      toast('Could not load files waiting for review/approval: ' + err.message, 'err');
     });
   activeSessionUnsubs.push(unsub);
 }
+// The approval queue now lives on the Files dashboard (Knowledge Management)
+// in app-files.js. This only works out how many items wait on the current
+// user, for the badge on the Files menu item, then asks the dashboard to redraw.
+// Admin can act on any pending step (on behalf of whoever it is assigned to).
+function myActionableVersions(){
+  if(!currentUser) return [];
+  const isAdminUser = currentUser.role === 'admin';
+  return Array.from(queueMap.values()).filter(v =>
+    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (isStepAssignedToMe(s) || isAdminUser))
+  );
+}
+// The step the current user would decide on: their own if assigned, else (Admin) the first pending one.
+function myActionStep(v){
+  const pending = (v.steps||[]).filter(s => s.stage === v.currentStage && s.decision === 'pending');
+  return pending.find(isStepAssignedToMe) || (currentUser && currentUser.role === 'admin' ? pending[0] : null) || null;
+}
 function renderQueue(){
   if(!currentUser) return;
-  if(typeof onQueueDataChanged === 'function') onQueueDataChanged();
-  const myRoles = getUserRoles(currentUser);
-  let mine = Array.from(queueMap.values()).filter(v =>
-    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (isStepAssignedToMe(s) || currentUser.role === 'admin'))
-  );
-  mine.sort((a,b) => ((a.uploadedAt&&a.uploadedAt.toMillis)?a.uploadedAt.toMillis():0) - ((b.uploadedAt&&b.uploadedAt.toMillis)?b.uploadedAt.toMillis():0));
-
+  const mine = myActionableVersions();
   const badge = document.getElementById('queueBadge');
-  badge.textContent = mine.length;
-  badge.classList.toggle('hidden', mine.length === 0);
-
-  const overdueCount = mine.filter(isOverdue).length;
-  const publishedCount = allDocsSnapshot.filter(d => d.status === 'published').length;
-  document.getElementById('queueStats').innerHTML = `
-    <div class="stat-card accent-gold"><div class="num">${mine.length}</div><div class="lbl">Awaiting your action</div></div>
-    <div class="stat-card accent-red clickable ${queueShowOverdueOnly?'stat-active':''}" onclick="toggleOverdueOnly()"><div class="num">${overdueCount}</div><div class="lbl">Overdue (past TAT)${queueShowOverdueOnly?' &middot; showing only these':''}</div></div>
-    <div class="stat-card accent-teal clickable" onclick="goToDocumentsFiltered('')"><div class="num">${queueMap.size}</div><div class="lbl">Active in the workflow</div></div>
-    <div class="stat-card clickable" onclick="goToDocumentsFiltered('published')"><div class="num">${publishedCount}</div><div class="lbl">Published documents</div></div>`;
-
-  if(queueShowOverdueOnly) mine = mine.filter(isOverdue);
-  const list = document.getElementById('queueList');
-  if(mine.length === 0){
-    const myRoleNames = myRoles.map(r => ROLE_LABELS[r] || r).join(', ');
-    list.innerHTML = queueShowOverdueOnly
-      ? `<div class="empty-state"><div class="ic">&#9989;</div><b>Nothing overdue</b><div>None of your pending items are past their review/approval TAT. <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="toggleOverdueOnly()">Show all</button></div></div>`
-      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on you right now.</div></div>`;
-    return;
-  }
-  list.innerHTML = mine.map(v => {
-    const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && isStepAssignedToMe(s))
-      || v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && currentUser.role === 'admin');
-    const maxStage = Math.max(...v.steps.map(s => s.stage));
-    const isFinal = myStep.stage === maxStage;
-    const overdue = isOverdue(v);
-    const chips = v.steps.map(s => {
-      let cls = 'pending';
-      if(s.decision === 'approved') cls = 'approved';
-      else if(s.decision === 'rejected') cls = 'rejected';
-      else if(s.stage === v.currentStage) cls = 'active-pending';
-      return `<span class="step-chip ${cls}">${escapeHtml(s.label)}</span>`;
-    }).join('');
-    return `<div class="queue-card ${overdue?'overdue':''}">
-      <div class="queue-main">
-        <div class="queue-title-row"><h4>${escapeHtml(v.docTitle)}</h4><span class="drawing-code">${escapeHtml(v.docDrawingNumber)}</span></div>
-        <div class="queue-meta">${v.docFolderId && typeof folderPath === 'function' ? `&#128193; ${escapeHtml(folderPath(v.docFolderId))} &middot; ` : ''}${escapeHtml(v.docProject)} &middot; Uploaded by <b>${escapeHtml(v.uploadedByName)}</b> &middot; ${timeAgo(v.uploadedAt)}${overdue?' &middot; <span class="overdue-tag">Overdue</span>':''}</div>
-        <div class="step-chip-row">${chips}</div>
-      </div>
-      <div class="queue-actions">
-        <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','approved','${escapeJs(myStep.label)}',${isFinal})">Approve</button>
-        <button class="btn btn-red btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${myStep.key}','rejected','${escapeJs(myStep.label)}',${isFinal})">Reject</button>
-        <button class="btn btn-ghost btn-sm" onclick="openDocumentDetail('${v.docId}')">Details</button>
-      </div>
-    </div>`;
-  }).join('');
+  if(badge){ badge.textContent = mine.length; badge.classList.toggle('hidden', mine.length === 0); }
+  if(typeof onQueueDataChanged === 'function') onQueueDataChanged();
 }
 
 /* ============================================================
