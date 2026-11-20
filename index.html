@@ -508,7 +508,6 @@
   <div class="sidebar">
     <div class="nav-group-label">Document Management</div>
     <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files<span class="nav-badge hidden" id="queueBadge" title="Files waiting for your review/approval">0</span></button>
-    <button class="nav-item" data-view="defaultDirView" onclick="switchView('defaultDirView')"><span class="ic">&#127968;</span> Default Directory</button>
     <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
     <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
@@ -526,7 +525,7 @@
         <div class="fm-tree-pane">
           <div class="fm-tree-head"><input type="text" id="fmTreeSearch" placeholder="Search folders&hellip;" oninput="onFmTreeFilter(this.value)"></div>
           <div class="fm-node fm-special" id="fmAllDocsNode" onclick="openFmAllDocs()"><span class="fm-caret"></span><span class="fm-special-ic">&#128196;</span><span class="fm-node-name">All Documents</span></div>
-          <div class="fm-tree-title"><span>Default Directory</span><button class="fm-link" onclick="openFmDashboard()">Home</button></div>
+          <div class="fm-tree-title"><span>Folders</span><button class="fm-link" onclick="openFmDashboard()">Home</button></div>
           <div class="fm-tree" id="fmTree"><div class="master-empty">Loading&hellip;</div></div>
         </div>
         <div class="fm-main-pane">
@@ -590,28 +589,6 @@
       </div>
       <div class="subview-empty" id="configEmpty">Select a configuration to open it.</div>
       <div id="configHost"></div>
-    </div>
-
-    <!-- ---------------- DEFAULT DIRECTORY VIEW ---------------- -->
-    <div class="view" id="defaultDirView">
-      <div class="view-head"><h2>Default Directory</h2></div>
-      <div class="view-sub">The folder <b>Files</b> opens on when you sign in.</div>
-      <div class="card panel" style="max-width:720px; margin-bottom:16px;">
-        <div class="form-section-title">My default directory</div>
-        <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
-          <div class="field" style="flex:1; min-width:280px; margin-bottom:0;"><select id="ddMyFolder"></select></div>
-          <button class="btn btn-orange" onclick="saveMyDefaultDir()">Save</button>
-        </div>
-        <div class="auth-hint" id="ddMyCurrent"></div>
-      </div>
-      <div class="card panel hidden" style="max-width:720px;" id="ddAdminCard">
-        <div class="form-section-title">Set for another user (Admin)</div>
-        <div class="upload-grid" style="max-width:none;">
-          <div class="field"><label>User</label><select id="ddUser" onchange="onDdUserChange()"></select></div>
-          <div class="field"><label>Default Directory</label><select id="ddFolder"></select></div>
-        </div>
-        <div style="display:flex; gap:10px; align-items:center;"><button class="btn btn-orange" onclick="saveUserDefaultDir()">Save</button><span class="auth-hint" style="margin:0;" id="ddUserCurrent"></span></div>
-      </div>
     </div>
 
     <!-- ---------------- REPORTS VIEW ---------------- -->
@@ -1236,7 +1213,6 @@ let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 const PAGE_ACCESS_ITEMS = [
   { key: 'filesView', label: 'Files' },
   { key: 'uploadView', label: 'Upload (button in folders)' },
-  { key: 'defaultDirView', label: 'Default Directory' },
   { key: 'fmReportsView', label: 'Reports' },
   { key: 'alertsView', label: 'Alerts' }
 ];

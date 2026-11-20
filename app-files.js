@@ -5,7 +5,7 @@
    AFTER app-workflow.js).
 
    Covers:
-     Files            — folder tree (Default Directory) + Knowledge
+     Files            — folder tree + Knowledge
                         Management dashboard, folder pages, search,
                         advanced search, quick links, subscriptions
      Folder actions   — Properties (reviewers/approvers), Permissions
@@ -13,7 +13,6 @@
                         New Subfolder, Delete Folder
      Root Folder      — create / rename / delete top-level folders
      Set Parameter    — allowed file types, max size, review/approval TAT
-     Default Directory— the folder Files opens on, per user
      Email Config     — emails via the Firebase "Trigger Email" extension
      Reports          — Files Details, Folder Approver Details (+ CSV)
      Alerts           — overdue reviews/approvals with reminders
@@ -28,7 +27,7 @@
                          (set on project folders; ID is proj_<projectMasterId>),
                          permissions{users,roles,departments,applyToSubfolders},
                          reviewers[uid], approvers[uid], subscribers[uid]
-     userPrefs/{uid}     quickLinks[folderId], defaultFolderId
+     userPrefs/{uid}     quickLinks[folderId]
      dmsSettings/params  allowedExtensions, maxFileSizeMB, reviewTatDays,
                          approvalTatDays, folderNoDigits
      dmsSettings/email   enabled, fromName, fromAddress, replyTo, appUrl, event flags
@@ -54,7 +53,7 @@ let emailConfig = { ...DEFAULT_EMAIL_CONFIG };
 let foldersData = [];
 let foldersById = new Map();
 let foldersLoaded = false;
-let myPrefs = { quickLinks: [], defaultFolderId: null };
+let myPrefs = { quickLinks: [] };
 let prefsLoaded = false;
 let fmActiveFolderId = null;
 let fmExpanded = new Set();
@@ -66,7 +65,6 @@ let fmOverdueOnly = false;
 let fmSearchState = null;          // { crit, label, results|null }
 let fmLinksPanel = null;           // 'quick' | 'subs' | null
 let fmFilesUnsubs = [];
-let fmInitialFolderApplied = false;
 let fmFolderModal = null;          // { mode:'create'|'rename', parentId, folderId }
 let fmPropsFolderId = null;
 let permDraft = null, permEntity = 'user', permFolderId = null;
@@ -399,13 +397,11 @@ function startFilesListeners(){
 
   fmFilesUnsubs.push(db.collection('userPrefs').doc(currentUser.uid).onSnapshot(snap => {
     const d = snap.exists ? snap.data() : {};
-    myPrefs = { quickLinks: d.quickLinks || [], defaultFolderId: d.defaultFolderId || null };
+    myPrefs = { quickLinks: d.quickLinks || [] };
     prefsLoaded = true;
     renderFmLinksPanel();
     if(fmActiveFolderId) renderFmMain();
-    renderDefaultDirView();
-    applyDefaultFolderOnce();
-  }, err => { console.error('userPrefs listener:', err); prefsLoaded = true; applyDefaultFolderOnce(); }));
+  }, err => { console.error('userPrefs listener:', err); prefsLoaded = true; }));
 
   fmFilesUnsubs.push(db.collection('dmsSettings').doc('params').onSnapshot(snap => {
     dmsParams = { ...DEFAULT_DMS_PARAMS, ...(snap.exists ? snap.data() : {}) };
@@ -425,10 +421,10 @@ function stopFilesListeners(){
   fmFilesUnsubs = [];
   if(fmFolderDocsUnsub){ try{ fmFolderDocsUnsub(); }catch(e){} fmFolderDocsUnsub = null; }
   foldersData = []; foldersById = new Map(); foldersLoaded = false;
-  myPrefs = { quickLinks: [], defaultFolderId: null }; prefsLoaded = false;
+  myPrefs = { quickLinks: [] }; prefsLoaded = false;
   projectSyncInFlight = new Set();
   fmActiveFolderId = null; fmExpanded = new Set(); fmTreeFilter = ''; fmFolderDocs = null;
-  fmKmOpen = new Set(['pendReview', 'pendApproval']); fmOverdueOnly = false; fmSearchState = null; fmLinksPanel = null; fmInitialFolderApplied = false; fmShowAllDocs = false;
+  fmKmOpen = new Set(['pendReview', 'pendApproval']); fmOverdueOnly = false; fmSearchState = null; fmLinksPanel = null; fmShowAllDocs = false;
   fmReportRows = null; fmActiveReport = null; fmMoveCandidates = []; fmTransferFrom = null;
   dmsParams = { ...DEFAULT_DMS_PARAMS }; emailConfig = { ...DEFAULT_EMAIL_CONFIG };
 }
@@ -441,9 +437,7 @@ function onFoldersChanged(){
   renderFmMain();
   populateFolderSelects();
   renderRootFolderView();
-  renderDefaultDirView();
   updateUploadWorkflowHint();
-  applyDefaultFolderOnce();
   renderDocsTable();
   if(fmActiveReport === 'approvers') runFolderApproverReport();
 }
@@ -458,18 +452,11 @@ function onFmUsersChanged(){
   renderFmMain();
   renderAlerts();
 }
-function applyDefaultFolderOnce(){
-  if(fmInitialFolderApplied || !foldersLoaded || !prefsLoaded) return;
-  fmInitialFolderApplied = true;
-  const id = myPrefs.defaultFolderId;
-  if(id && foldersById.has(id) && canAccessFolder(id)) openFmFolder(id, { noSwitch: true });
-}
 // Hook from switchView() in index.html
 function onFmViewShown(viewId){
   if(viewId === 'filesView'){ renderFmTree(); renderFmMain(); }
   if(viewId === 'setParamView') fillSetParamForm();
   if(viewId === 'emailConfigView') fillEmailConfigForm();
-  if(viewId === 'defaultDirView') renderDefaultDirView();
   if(viewId === 'alertsView') renderAlerts();
   if(viewId === 'rootFolderView') renderRootFolderView();
   if(viewId === 'moveFilesView') populateFolderSelects();
@@ -660,7 +647,6 @@ function renderFmFolder(el){
   const subs = childFolders(id).filter(c => vis.has(c.id));
   const isQuick = myPrefs.quickLinks.includes(id);
   const isSub = (f.subscribers || []).includes(currentUser.uid);
-  const isDefault = myPrefs.defaultFolderId === id;
 
   const crumbs = `<a onclick="openFmDashboard()">Home</a> / ` + chain.map(c => c.id === id ? `<b>${escapeHtml(c.name)}</b>` : `<a onclick="openFmFolder('${c.id}')">${escapeHtml(c.name)}</a>`).join(' / ');
   const wfText = wf
@@ -670,8 +656,7 @@ function renderFmFolder(el){
       ${fmIsAdmin() ? `<a onclick="openFolderPermModal('${id}')">Permissions</a><span class="sep">|</span>
       <a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>
       <a class="danger" onclick="deleteFolder('${id}')">Delete Folder</a><span class="sep">|</span>` : ''}
-      <a onclick="toggleQuickLink('${id}')">${isQuick ? '&#9733; Remove Quick Link' : '&#9734; Add to Quick Links'}</a><span class="sep">|</span>
-      ${isDefault ? `<span class="fm-muted">My default directory</span>` : `<a onclick="setMyDefaultFolder('${id}')">Set as my default directory</a>`}
+      <a onclick="toggleQuickLink('${id}')">${isQuick ? '&#9733; Remove Quick Link' : '&#9734; Add to Quick Links'}</a>
     </div>`;
 
   let filesHtml;
@@ -735,11 +720,6 @@ function toggleSubscribe(id){
     subscribers: on ? firebase.firestore.FieldValue.arrayRemove(currentUser.uid) : firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
   })
     .then(() => toast(on ? 'Unsubscribed.' : "Subscribed — you'll be notified when files are added here or in its subfolders.", 'ok'))
-    .catch(err => toast('Could not save: ' + err.message, 'err'));
-}
-function setMyDefaultFolder(id){
-  db.collection('userPrefs').doc(currentUser.uid).set({ defaultFolderId: id || null }, { merge: true })
-    .then(() => toast(id ? 'Default directory set — Files will open here.' : 'Default directory cleared.', 'ok'))
     .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
 function toggleFmLinksPanel(which){
@@ -1035,7 +1015,7 @@ function submitFolderPerm(){
 }
 
 /* ============================================================
-   SELECTS shared by Upload / Move / Default Directory / Reports
+   SELECTS shared by Upload / Move / Reports / search
 ============================================================ */
 function fillFolderSelect(selId, items, placeholder){
   const sel = document.getElementById(selId);
@@ -1049,8 +1029,6 @@ function populateFolderSelects(){
   const accessible = folderOptions(true);
   const all = folderOptions(false);
   fillFolderSelect('fFolder', accessible, 'Select folder&hellip;');
-  fillFolderSelect('ddMyFolder', accessible, '(None — open the Knowledge Management dashboard)');
-  fillFolderSelect('ddFolder', all, '(None — clear default)');
   fillFolderSelect('mfDest', all, 'Select destination folder&hellip;');
   fillFolderSelect('mfSource', [{ id: UNFILED, path: '(Unfiled — uploaded before folders)' }, ...all], 'Select source folder&hellip;');
   fillFolderSelect('filterFolder', [{ id: UNFILED, path: '(Unfiled — uploaded before folders)' }, ...accessible], 'All folders');
@@ -1103,47 +1081,6 @@ function saveDmsParams(ev){
     .then(() => toast('Parameters saved.', 'ok'))
     .catch(err => toast('Could not save: ' + err.message, 'err'));
   return false;
-}
-
-/* ============================================================
-   DEFAULT DIRECTORY
-============================================================ */
-function renderDefaultDirView(){
-  if(!currentUser) return;
-  populateFolderSelects();
-  const my = document.getElementById('ddMyFolder');
-  if(my && document.activeElement !== my) my.value = (myPrefs.defaultFolderId && foldersById.has(myPrefs.defaultFolderId)) ? myPrefs.defaultFolderId : '';
-  const cur = document.getElementById('ddMyCurrent');
-  if(cur) cur.innerHTML = myPrefs.defaultFolderId && foldersById.has(myPrefs.defaultFolderId)
-    ? `Currently: <b>${escapeHtml(folderPath(myPrefs.defaultFolderId))}</b>` : 'Currently: <b>Knowledge Management dashboard</b>';
-  const adminCard = document.getElementById('ddAdminCard');
-  if(adminCard) adminCard.classList.toggle('hidden', !fmIsAdmin());
-  const userSel = document.getElementById('ddUser');
-  if(userSel && fmIsAdmin()){
-    const prev = userSel.value;
-    userSel.innerHTML = '<option value="">Select a user&hellip;</option>' + usersData.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
-    if(usersData.some(u => u.id === prev)) userSel.value = prev;
-  }
-}
-function saveMyDefaultDir(){ setMyDefaultFolder(document.getElementById('ddMyFolder').value || null); }
-function onDdUserChange(){
-  const uid = document.getElementById('ddUser').value;
-  const folderSel = document.getElementById('ddFolder');
-  const note = document.getElementById('ddUserCurrent');
-  if(!uid){ folderSel.value = ''; note.textContent = ''; return; }
-  db.collection('userPrefs').doc(uid).get().then(s => {
-    const d = s.exists ? s.data() : {};
-    folderSel.value = d.defaultFolderId && foldersById.has(d.defaultFolderId) ? d.defaultFolderId : '';
-    note.innerHTML = d.defaultFolderId && foldersById.has(d.defaultFolderId) ? `Currently: <b>${escapeHtml(folderPath(d.defaultFolderId))}</b>` : 'Currently: <b>dashboard</b>';
-  }).catch(err => toast('Could not load: ' + err.message, 'err'));
-}
-function saveUserDefaultDir(){
-  const uid = document.getElementById('ddUser').value;
-  if(!uid){ toast('Please choose a user.', 'err'); return; }
-  const folderId = document.getElementById('ddFolder').value || null;
-  db.collection('userPrefs').doc(uid).set({ defaultFolderId: folderId }, { merge: true })
-    .then(() => { toast(`Default directory saved for ${userName(uid)}.`, 'ok'); onDdUserChange(); })
-    .catch(err => toast('Could not save: ' + err.message, 'err'));
 }
 
 /* ============================================================
@@ -1297,7 +1234,7 @@ function renderAlerts(){
       <div class="stat-card accent-teal"><div class="num">${mineCount}</div><div class="lbl">Waiting on me</div></div>
     </div>
     <div class="card">
-      ${all.length === 0 ? `<div class="empty-state"><div class="ic">&#9989;</div><b>No overdue files</b><div>Everything is within its review/approval TAT.</div></div>` :
+      ${all.length === 0 ? `<div class="empty-state"><div class="ic">&#9989;</div><b>No overdue files</b><div>Alerts lists files that have been waiting <b>longer than the TAT</b> &mdash; Review ${Number(dmsParams.reviewTatDays)} day(s), Approval ${Number(dmsParams.approvalTatDays)} day(s) (Configurations &rarr; Set Parameter).<br>Right now <b>${queueMap.size}</b> file(s) are in review/approval and none of them is overdue.</div></div>` :
       `<table class="fm-table"><thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Stage</th><th>Waiting On</th><th>Days</th><th></th></tr></thead><tbody>
         ${all.map(v => {
           const days = Math.floor((Date.now() - stageStartMs(v)) / 86400000);
@@ -1416,7 +1353,7 @@ function loadTransferRights(){
         <td>${escapeHtml(folderPath(r.f.id))}</td>
         <td>${r.rights.map(x => `<span class="fm-tag open" style="margin-right:4px;">${x}</span>`).join('')}</td>
       </tr>`).join('')
-    : `<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No records found</td></tr>`;
+    : `<tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:18px;">No records found &mdash; ${escapeHtml(userName(from))} isn't named personally on any folder (as a Permissions user, Reviewer, Approver or Subscriber).<br>Rights given through a <b>Role</b> or <b>Department</b> don't need transferring: give the new person that role or department in Manage Users.</td></tr>`;
   document.getElementById('trAllCb').checked = true;
   document.getElementById('trTasksNote').innerHTML = tasks.length
     ? `<label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="trTasks" checked style="width:auto;"> Also hand over <b>${tasks.length}</b> pending review/approval task(s) assigned to ${escapeHtml(userName(from))}</label>`
