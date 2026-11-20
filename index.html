@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="data:,">
-<title>MP DMS &mdash; Approval Workflow Engine</title>
+<title>MP DMS &mdash; Document Management</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
@@ -16,14 +16,14 @@
 
 <style>
   :root{
-    --navy:#1B263B;
-    --navy-dark:#111826;
-    --navy-soft:#2C3A55;
+    --navy:#1B3A6B;
+    --navy-dark:#0F2546;
+    --navy-soft:#2B4E85;
     --teal:#14746F;
     --teal-soft:#E4EFEE;
-    --gold:#9C7A12;
-    --gold-bright:#C9A227;
-    --gold-soft:#F6EFD9;
+    --gold:#B85A10;
+    --gold-bright:#F37021;
+    --gold-soft:#FEEFE3;
     --red:#9C2B2B;
     --red-soft:#F7E7E7;
     --bg:#F3F4F7;
@@ -58,8 +58,8 @@
   #loginScreen{
     min-height:100vh; display:flex; align-items:center; justify-content:center;
     background:
-      radial-gradient(1200px 600px at 15% -10%, #24304a 0%, transparent 60%),
-      radial-gradient(900px 500px at 110% 10%, #1a3532 0%, transparent 55%),
+      radial-gradient(1200px 600px at 15% -10%, #24467e 0%, transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, #7a3a10 0%, transparent 55%),
       var(--navy-dark);
     padding:24px;
   }
@@ -101,7 +101,7 @@
   .btn-red:hover{filter:brightness(1.1);}
   .btn-ghost{background:transparent; color:var(--navy); border:1px solid var(--border);}
   .btn-ghost:hover{background:var(--bg);}
-  .btn-gold{background:var(--gold-bright); color:#3a2c04;}
+  .btn-gold{background:var(--gold-bright); color:#fff;}
   .btn:disabled{opacity:.55; cursor:not-allowed;}
   .auth-error{background:var(--red-soft); color:var(--red); font-size:12.5px; padding:9px 11px; border-radius:7px; margin-bottom:14px; display:none;}
   .auth-hint{margin-top:16px; font-size:11.5px; color:var(--text-muted); line-height:1.5;}
@@ -125,11 +125,11 @@
   .icon-btn:hover{background:#3a4a6b;}
   .notif-dot{
     position:absolute; top:-3px; right:-3px; min-width:16px; height:16px; padding:0 4px; border-radius:8px;
-    background:var(--gold-bright); color:#3a2c04; font-size:9.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+    background:var(--gold-bright); color:#fff; font-size:9.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
   }
   .user-chip{display:flex; align-items:center; gap:9px; padding:5px 10px 5px 5px; background:var(--navy-soft); border-radius:20px;}
   .user-avatar{
-    width:26px; height:26px; border-radius:50%; background:var(--gold-bright); color:#3a2c04;
+    width:26px; height:26px; border-radius:50%; background:var(--gold-bright); color:#fff;
     font-weight:700; font-size:11.5px; display:flex; align-items:center; justify-content:center; flex:none;
   }
   .user-meta{line-height:1.15;}
@@ -148,7 +148,7 @@
   .nav-item .ic{width:18px; text-align:center; font-size:14px;}
   .nav-item:hover{background:var(--bg);}
   .nav-item.active{background:var(--teal-soft); color:var(--teal);}
-  .nav-badge{margin-left:auto; background:var(--gold-bright); color:#3a2c04; font-size:10px; font-weight:700; padding:1px 7px; border-radius:9px;}
+  .nav-badge{margin-left:auto; background:var(--gold-bright); color:#fff; font-size:10px; font-weight:700; padding:1px 7px; border-radius:9px;}
 
   .main{margin-left:212px; margin-top:58px; padding:26px 30px 60px; width:calc(100% - 212px); min-height:calc(100vh - 58px);}
   .view{display:none;}
@@ -363,6 +363,78 @@
   .notif-item .ntime{color:var(--text-muted); font-size:10.5px; margin-top:3px; font-family:var(--mono);}
   .notif-item.unread{background:#FBF8EF;}
 
+  /* ---------- File manager ---------- */
+  .btn-orange{background:var(--gold-bright); color:#fff;}
+  .btn-orange:hover{filter:brightness(1.06);}
+  .btn-outline-orange{background:#fff; color:var(--gold); border:1px solid #F7B98C;}
+  .btn-outline-orange:hover{background:var(--gold-soft);}
+  .fm-wrap{display:flex; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); min-height:calc(100vh - 120px); position:relative;}
+  .fm-tree-pane{width:290px; flex:none; border-right:1px solid var(--border); display:flex; flex-direction:column; background:#FBFCFD; border-radius:var(--radius) 0 0 var(--radius);}
+  .fm-tree-head{display:flex; align-items:center; gap:8px; padding:12px 12px 10px; border-bottom:1px solid var(--border);}
+  .fm-tree-head input{flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:7px; font-size:12.5px; font-style:italic;}
+  .fm-tree-title{padding:10px 14px 6px; font-size:12px; color:var(--text-muted); font-style:italic; display:flex; justify-content:space-between; align-items:center;}
+  .fm-tree{overflow-y:auto; flex:1; max-height:calc(100vh - 220px); padding-bottom:10px;}
+  .fm-node{display:flex; align-items:center; gap:6px; padding:7px 10px; font-size:12.5px; cursor:pointer; border-bottom:1px solid #EEF1F5; color:var(--text); user-select:none;}
+  .fm-node:hover{background:#F1F4F9;}
+  .fm-node.active{background:var(--gold-soft); color:var(--gold); font-weight:600;}
+  .fm-node.dim{color:var(--text-muted);}
+  .fm-node-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .fm-caret{width:14px; flex:none; font-size:10px; color:var(--text-muted); text-align:center;}
+  .fm-ficon{width:18px; height:14px; flex:none;}
+  .km-ficon{width:38px; height:29px; flex:none;}
+  .fm-main-pane{flex:1; min-width:0; padding:16px 22px 26px;}
+  .fm-toolbar{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px;}
+  .fm-toolbar input{width:280px; padding:9px 12px; border:1px solid var(--border); border-radius:7px; font-size:13px;}
+  .fm-toplinks{margin-left:auto; display:flex; gap:16px;}
+  .fm-link{color:var(--gold-bright); cursor:pointer; background:none; border:none; padding:0; font-weight:600; font-size:12.5px;}
+  .fm-link:hover{text-decoration:underline;}
+  .fm-pop{position:absolute; right:22px; top:58px; width:340px; max-height:60vh; overflow-y:auto; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 20px 50px -15px rgba(0,0,0,.3); z-index:20;}
+  .fm-pop-head{display:flex; justify-content:space-between; align-items:center; padding:10px 14px; font-weight:700; font-size:13px; color:var(--navy); border-bottom:1px solid var(--border);}
+  .fm-section-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
+  .fm-section-head h3{font-size:16px;}
+  .km-row{display:flex; align-items:center; gap:16px; padding:14px 4px; border-bottom:1px solid var(--border); cursor:pointer;}
+  .km-row:hover{background:#FAFBFD;}
+  .km-label{flex:1; font-weight:700; color:var(--navy); font-size:14px;}
+  .km-count{font-weight:700; font-size:14px; min-width:30px; text-align:right; color:var(--text);}
+  .km-toggle{width:22px; text-align:center; color:var(--text-muted); font-size:17px;}
+  .km-body{padding:6px 0 12px 54px; border-bottom:1px solid var(--border);}
+  .fm-table{width:100%; border-collapse:collapse;}
+  .fm-table thead th{background:#EAF1FB; color:var(--navy); font-size:11px; text-transform:none; letter-spacing:0; font-weight:700;}
+  .fm-table tbody td{font-size:12.5px; padding:9px 12px;}
+  .fm-file-cell{max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .fm-open{color:var(--gold-bright); font-weight:600; text-decoration:none; white-space:nowrap;}
+  .fm-empty-note{font-size:12.5px; color:var(--text-muted); padding:10px 2px;}
+  .fm-muted{color:var(--text-muted); font-weight:400;}
+  .fm-crumb{font-size:12px; color:var(--text-muted); margin-bottom:10px;}
+  .fm-crumb a{color:var(--gold-bright); cursor:pointer;}
+  .fm-crumb a:hover{text-decoration:underline;}
+  .fm-folder-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;}
+  .fm-folder-head h3{font-size:17px; flex:1; min-width:180px; word-break:break-word;}
+  .fm-folder-btns{display:flex; gap:6px; flex-wrap:wrap;}
+  .fm-meta{display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--text-muted);}
+  .fm-meta b{color:var(--text);}
+  .fm-desc{font-size:12.5px; color:var(--text); background:var(--bg); padding:8px 11px; border-radius:7px; margin-top:10px;}
+  .fm-actions-links{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12.5px; margin:12px 0 4px;}
+  .fm-actions-links a{color:var(--gold-bright); cursor:pointer; font-weight:600;}
+  .fm-actions-links a:hover{text-decoration:underline;}
+  .fm-actions-links a.danger{color:var(--red);}
+  .fm-actions-links .sep{color:var(--border);}
+  .fm-tag{display:inline-block; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:10px;}
+  .fm-tag.open{background:var(--teal-soft); color:var(--teal);}
+  .fm-tag.restricted{background:var(--red-soft); color:var(--red);}
+  .fm-subhead{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700; margin:20px 0 9px;}
+  .fm-sub-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px;}
+  .fm-sub{display:flex; align-items:center; gap:9px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:13px; background:#fff;}
+  .fm-sub:hover{border-color:#F7B98C; background:var(--gold-soft);}
+  .fm-report-count{padding:10px 14px; font-size:12px; color:var(--text-muted); border-bottom:1px solid var(--border);}
+  .report-row td a{color:var(--navy-soft); cursor:pointer; font-weight:600;}
+  .report-row.active{background:var(--gold-soft);}
+  .perm-head{display:flex; align-items:center; gap:10px; font-family:var(--display); font-weight:700; color:var(--navy); font-size:15px; margin-bottom:14px;}
+  .dual-listbox-buttons .orange{background:var(--gold-bright); color:#fff; border-color:var(--gold-bright);}
+  .form-section-title{font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700; margin:4px 0 10px;}
+  .check-row{display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:9px;}
+  .check-row input{width:auto !important;}
+
   .setup-banner{background:var(--gold-soft); border:1px solid #E9D9A6; color:#6E5309; padding:10px 14px; border-radius:9px; font-size:12.5px; margin-bottom:18px;}
 
   @media (max-width: 880px){
@@ -372,6 +444,10 @@
     .stat-row{grid-template-columns:1fr 1fr;}
     .user-meta{display:none;}
     .detail-meta-grid{grid-template-columns:1fr;}
+    .fm-wrap{flex-direction:column;}
+    .fm-tree-pane{width:100%; border-right:none; border-bottom:1px solid var(--border);}
+    .fm-tree{max-height:260px;}
+    .fm-toolbar input{width:100%;}
   }
 </style>
 </head>
@@ -382,7 +458,7 @@
   <div class="auth-card">
     <div class="auth-brand">
       <div class="auth-mark">MP</div>
-      <div class="auth-brand-text"><b>MP Developers DMS</b><span>Approval Workflow Engine</span></div>
+      <div class="auth-brand-text"><b>MP Developers DMS</b><span>Document Management &middot; Trust Forever</span></div>
     </div>
     <div class="auth-error" id="authError"></div>
 
@@ -400,7 +476,7 @@
 <div id="appShell">
   <div class="topbar">
     <div class="topbar-left">
-      <div class="top-title">MP DMS<small>Approval Workflow Engine</small></div>
+      <div class="top-title">MP DMS<small>Document Management</small></div>
     </div>
     <div class="topbar-right">
       <button class="icon-btn" id="notifBtn" onclick="toggleNotifPanel()" title="Notifications" aria-label="Notifications">
@@ -416,9 +492,13 @@
 
   <div class="sidebar">
     <div class="nav-group-label">Document Management</div>
-    <button class="nav-item active" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
+    <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files</button>
+    <button class="nav-item" data-view="uploadView" onclick="switchView('uploadView')"><span class="ic">&#8593;</span> Upload Document</button>
     <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
     <button class="nav-item" data-view="docsView" onclick="switchView('docsView')"><span class="ic">&#128193;</span> Documents</button>
+    <button class="nav-item" data-view="defaultDirView" onclick="switchView('defaultDirView')"><span class="ic">&#127968;</span> Default Directory</button>
+    <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
+    <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
     <button class="nav-item hidden" id="adminUsersNavBtn" data-view="usersView" onclick="switchView('usersView')"><span class="ic">&#128101;</span> Manage Users</button>
     <div class="nav-group-label hidden" id="adminMasterDataGroup" style="margin-top:10px;">Master Data</div>
@@ -430,14 +510,44 @@
     <button class="nav-item hidden" id="adminWorkflowNavBtn" data-view="workflowConfigView" onclick="switchView('workflowConfigView')"><span class="ic">&#8942;</span> Workflow Configuration</button>
     <button class="nav-item hidden" id="adminStatusNavBtn" data-view="statusConfigView" onclick="switchView('statusConfigView')"><span class="ic">&#127991;</span> Status Labels</button>
     <button class="nav-item hidden" id="adminUserAccessNavBtn" data-view="userAccessView" onclick="switchView('userAccessView')"><span class="ic">&#128101;</span> User Access</button>
+    <div class="nav-group-label hidden admin-master-nav" style="margin-top:10px;">File Manager Setup</div>
+    <button class="nav-item hidden admin-master-nav" data-view="rootFolderView" onclick="switchView('rootFolderView')"><span class="ic">&#128193;</span> Root Folder</button>
+    <button class="nav-item hidden admin-master-nav" data-view="setParamView" onclick="switchView('setParamView')"><span class="ic">&#9881;</span> Set Parameter</button>
+    <button class="nav-item hidden admin-master-nav" data-view="emailConfigView" onclick="switchView('emailConfigView')"><span class="ic">&#9993;</span> Email Configuration</button>
+    <button class="nav-item hidden admin-master-nav" data-view="moveFilesView" onclick="switchView('moveFilesView')"><span class="ic">&#8644;</span> Move File Location</button>
+    <button class="nav-item hidden admin-master-nav" data-view="transferRightsView" onclick="switchView('transferRightsView')"><span class="ic">&#8646;</span> Transfer Rights</button>
   </div>
 
   <div class="main">
 
     <!-- ---------------- UPLOAD VIEW ---------------- -->
-    <div class="view active" id="uploadView">
+    <!-- ---------------- FILES (FILE MANAGER) VIEW ---------------- -->
+    <div class="view active" id="filesView">
+      <div class="fm-wrap">
+        <div class="fm-tree-pane">
+          <div class="fm-tree-head"><input type="text" id="fmTreeSearch" placeholder="Search folders&hellip;" oninput="onFmTreeFilter(this.value)"></div>
+          <div class="fm-tree-title"><span>Default Directory</span><button class="fm-link" onclick="openFmDashboard()">Home</button></div>
+          <div class="fm-tree" id="fmTree"><div class="master-empty">Loading&hellip;</div></div>
+        </div>
+        <div class="fm-main-pane">
+          <div class="fm-toolbar">
+            <input type="text" id="fmSearchInput" placeholder="Search files &mdash; drawing no., title, file name, project&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); fmQuickSearch();}">
+            <button class="btn btn-primary btn-sm" style="width:auto;" onclick="fmQuickSearch()">Go</button>
+            <button class="btn btn-ghost btn-sm" onclick="openAdvancedSearchModal()">Advanced Search</button>
+            <div class="fm-toplinks">
+              <button class="fm-link" onclick="toggleFmLinksPanel('quick')">My Quick Links</button>
+              <button class="fm-link" onclick="toggleFmLinksPanel('subs')">Subscribed Folders</button>
+            </div>
+          </div>
+          <div class="fm-pop hidden" id="fmLinksPanel"></div>
+          <div id="fmMain"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="uploadView">
       <div class="view-head"><h2>Upload Document</h2></div>
-      <div class="view-sub" id="uploadSub">New uploads enter the configured approval workflow automatically.</div>
+      <div class="view-sub" id="uploadSub">Files go into a folder. If the folder has reviewers/approvers (folder Properties) they review it; otherwise the Document Category workflow applies.</div>
       <div class="card panel">
         <form id="uploadForm" onsubmit="return handleUpload(event)">
           <div class="upload-grid">
@@ -448,6 +558,11 @@
                 <div id="filePillWrap"></div>
               </label>
               <input type="file" id="fileInput" class="hidden">
+            </div>
+            <div class="field full"><label>Folder</label>
+              <select id="fFolder" required onchange="updateUploadWorkflowHint()">
+                <option value="">Select folder&hellip;</option>
+              </select>
             </div>
             <div class="field"><label>Project</label>
               <select id="fProject" required>
@@ -503,14 +618,158 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Drawing No.</th><th>Title</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
+          <thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Project</th><th>Version</th><th>Status</th><th>Updated</th></tr></thead>
           <tbody id="docsTableBody">
-            <tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
+            <tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
+    <!-- ---------------- DEFAULT DIRECTORY VIEW ---------------- -->
+    <div class="view" id="defaultDirView">
+      <div class="view-head"><h2>Default Directory</h2></div>
+      <div class="view-sub">The folder <b>Files</b> opens on when you sign in.</div>
+      <div class="card panel" style="max-width:720px; margin-bottom:16px;">
+        <div class="form-section-title">My default directory</div>
+        <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="field" style="flex:1; min-width:280px; margin-bottom:0;"><select id="ddMyFolder"></select></div>
+          <button class="btn btn-orange" onclick="saveMyDefaultDir()">Save</button>
+        </div>
+        <div class="auth-hint" id="ddMyCurrent"></div>
+      </div>
+      <div class="card panel hidden" style="max-width:720px;" id="ddAdminCard">
+        <div class="form-section-title">Set for another user (Admin)</div>
+        <div class="upload-grid" style="max-width:none;">
+          <div class="field"><label>User</label><select id="ddUser" onchange="onDdUserChange()"></select></div>
+          <div class="field"><label>Default Directory</label><select id="ddFolder"></select></div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;"><button class="btn btn-orange" onclick="saveUserDefaultDir()">Save</button><span class="auth-hint" style="margin:0;" id="ddUserCurrent"></span></div>
+      </div>
+    </div>
+
+    <!-- ---------------- REPORTS VIEW ---------------- -->
+    <div class="view" id="fmReportsView">
+      <div class="view-head"><h2>Reports</h2></div>
+      <div class="view-sub">File and folder reports. Click a report name to run it; every report can be exported to CSV (opens in Excel).</div>
+      <div class="card" style="margin-bottom:16px;">
+        <table>
+          <thead><tr><th style="width:160px;">Category</th><th>Report Name</th><th>Report Description</th></tr></thead>
+          <tbody>
+            <tr class="report-row" data-report="files" onclick="openReport('files')"><td>Management</td><td><a>Files Details</a></td><td>This report will display the files details &mdash; folder, drawing no., version, status, uploader and dates.</td></tr>
+            <tr class="report-row" data-report="approvers" onclick="openReport('approvers')"><td></td><td><a>Folder Approver Details</a></td><td>This report will display the Folder Approver and Reviewer details, with each folder's permissions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="reportPanel"></div>
+    </div>
+
+    <!-- ---------------- ALERTS VIEW ---------------- -->
+    <div class="view" id="alertsView">
+      <div class="view-head"><h2>Alerts</h2></div>
+      <div class="view-sub">Files waiting longer than their review/approval turnaround time (TAT, from Set Parameter).</div>
+      <div id="alertsPanel"></div>
+    </div>
+
+    <!-- ---------------- ROOT FOLDER VIEW (admin) ---------------- -->
+    <div class="view" id="rootFolderView">
+      <div class="view-head"><h2>Root Folder</h2><button class="btn btn-orange" onclick="openCreateFolderModal(null)">+ Create Root Folder</button></div>
+      <div class="view-sub">Top-level folders of the file tree. Open one to add subfolders, set its reviewers/approvers (Properties) and who can see it (Permissions). A folder can only be deleted once it has no subfolders or files.</div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Folder No.</th><th>Name</th><th>Subfolders</th><th>Access</th><th>Created By</th><th></th></tr></thead>
+          <tbody id="rootFolderTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ---------------- SET PARAMETER VIEW (admin) ---------------- -->
+    <div class="view" id="setParamView">
+      <div class="view-head"><h2>Set Parameter</h2></div>
+      <div class="view-sub">System-wide file manager settings.</div>
+      <div class="card panel" style="max-width:760px;">
+        <form onsubmit="return saveDmsParams(event)">
+          <div class="upload-grid">
+            <div class="field full"><label>Allowed file types (comma-separated extensions)</label><input type="text" id="spAllowedExt" placeholder="pdf,dwg,jpg,docx,xlsx"><div class="auth-hint" style="margin-top:5px;">Leave empty to allow any file type.</div></div>
+            <div class="field"><label>Maximum file size (MB)</label><input type="number" id="spMaxSize" min="0" max="2048"><div class="auth-hint" style="margin-top:5px;">0 = no limit.</div></div>
+            <div class="field"><label>Folder number digits</label><input type="number" id="spFolderDigits" min="1" max="12"><div class="auth-hint" style="margin-top:5px;">e.g. 7 shows folder 31 as 0000031.</div></div>
+            <div class="field"><label>Review TAT (days)</label><input type="number" id="spReviewTat" min="0" max="365"></div>
+            <div class="field"><label>Approval TAT (days)</label><input type="number" id="spApprovalTat" min="0" max="365"></div>
+            <div class="full"><button class="btn btn-orange" type="submit">Save Parameters</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ---------------- EMAIL CONFIGURATION VIEW (admin) ---------------- -->
+    <div class="view" id="emailConfigView">
+      <div class="view-head"><h2>Email Configuration</h2></div>
+      <div class="view-sub">Email alerts alongside the in-app notifications.</div>
+      <div class="setup-banner" style="max-width:760px;">Emails are sent by the Firebase <b>Trigger Email</b> extension (Firebase console &rarr; Extensions &rarr; "Trigger Email from Firestore", collection <b>mail</b>, with your company SMTP details). Until it's installed, emails are only queued in the <b>mail</b> collection, not sent.</div>
+      <div class="card panel" style="max-width:760px;">
+        <form onsubmit="return saveEmailConfig(event)">
+          <label class="check-row" style="font-weight:600;"><input type="checkbox" id="ecEnabled"> Send email alerts</label>
+          <div class="upload-grid" style="margin-top:10px;">
+            <div class="field"><label>Sender name</label><input type="text" id="ecFromName" placeholder="MP DMS"></div>
+            <div class="field"><label>Sender address <span style="font-weight:400;">(optional)</span></label><input type="email" id="ecFromAddress" placeholder="dms@mpdevelopers.com"></div>
+            <div class="field"><label>Reply-to <span style="font-weight:400;">(optional)</span></label><input type="email" id="ecReplyTo"></div>
+            <div class="field"><label>App link in emails <span style="font-weight:400;">(optional)</span></label><input type="url" id="ecAppUrl" placeholder="https://&hellip;/dms/"></div>
+          </div>
+          <div class="form-section-title" style="margin-top:6px;">Send an email when</div>
+          <label class="check-row"><input type="checkbox" id="ecOnTask"> A file needs someone's review or approval (and reminders from Alerts)</label>
+          <label class="check-row"><input type="checkbox" id="ecOnRejected"> An uploader's file is rejected</label>
+          <label class="check-row"><input type="checkbox" id="ecOnPublished"> An uploader's file is approved &amp; published</label>
+          <label class="check-row"><input type="checkbox" id="ecOnSubscribed"> A file is added to a folder someone subscribed to</label>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="btn btn-orange" type="submit">Save</button>
+            <button class="btn btn-ghost" type="button" onclick="sendTestEmail()">Send test email to me</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ---------------- MOVE FILE LOCATION VIEW (admin) ---------------- -->
+    <div class="view" id="moveFilesView">
+      <div class="view-head"><h2>Moving Location For Historic Files</h2></div>
+      <div class="view-sub">Move every file uploaded to one folder within a date range into another folder. Use <b>(Unfiled)</b> as the source to file documents uploaded before folders existed.</div>
+      <div class="card panel">
+        <div class="upload-grid" style="max-width:none;">
+          <div class="field"><label>From Date <span style="color:var(--red);">*</span></label><input type="date" id="mfFrom" onchange="loadMoveCandidates()"></div>
+          <div class="field"><label>To Date <span style="color:var(--red);">*</span></label><input type="date" id="mfTo" onchange="loadMoveCandidates()"></div>
+          <div class="field"><label>Files Source Path <span style="color:var(--red);">*</span></label><select id="mfSource" onchange="loadMoveCandidates()"></select></div>
+          <div class="field"><label>Files Destination Path</label><select id="mfDest"></select></div>
+          <div class="field"><label>Total Files</label><div style="font-size:15px; font-weight:700; color:var(--gold-bright); padding-top:6px;" id="mfTotal">0</div></div>
+          <div class="field" style="display:flex; align-items:flex-end;"><button class="btn btn-primary" style="width:auto;" id="mfGoBtn" onclick="runMoveFiles()">Go</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------------- TRANSFER RIGHTS VIEW (admin) ---------------- -->
+    <div class="view" id="transferRightsView">
+      <div class="view-head"><h2>Transfer Rights</h2></div>
+      <div class="view-sub">Hand an employee's folder permissions, reviewer/approver duties, subscriptions and pending tasks to someone else (e.g. when they leave or change roles).</div>
+      <div class="card panel" style="margin-bottom:14px;">
+        <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="field" style="min-width:320px; margin-bottom:0;"><label>Employee Name <span style="color:var(--red);">*</span></label><select id="trFrom"></select></div>
+          <button class="btn btn-primary" style="width:auto;" onclick="loadTransferRights()">Go</button>
+        </div>
+      </div>
+      <div class="hidden" id="trResult">
+        <div class="card panel" style="margin-bottom:14px;">
+          <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+            <div class="field" style="min-width:320px; margin-bottom:0;"><label>Transfer Rights To <span style="color:var(--red);">*</span></label><select id="trTo"></select></div>
+            <button class="btn btn-orange" onclick="submitTransferRights()">Transfer</button>
+          </div>
+          <div style="margin-top:12px; font-size:13px;" id="trTasksNote"></div>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th style="width:40px;"><input type="checkbox" id="trAllCb" checked style="width:auto;" onchange="toggleAllTransfer(this)"></th><th>Folder Name</th><th>Rights</th></tr></thead>
+            <tbody id="trTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <!-- ---------------- MANAGE USERS VIEW (admin only) ---------------- -->
     <div class="view" id="usersView">
@@ -708,7 +967,7 @@
       <div style="font-size:52px; margin-bottom:16px;">&#9989;</div>
       <h2 style="margin:0 0 10px; font-size:22px; color:var(--navy);">Document Submitted!</h2>
       <div id="docSubmittedDetails" style="font-size:14px; color:var(--text-muted); margin-bottom:24px;"></div>
-      <button class="btn btn-teal" style="width:100%; padding:12px;" onclick="closeDocSubmittedModal()">OK</button>
+      <button class="btn btn-orange" style="width:100%; padding:12px;" onclick="closeDocSubmittedModal()">OK &mdash; open folder</button>
     </div>
   </div>
 </div>
@@ -787,6 +1046,118 @@
   </div>
 </div>
 
+<!-- ---------------- CREATE / RENAME FOLDER MODAL ---------------- -->
+<div class="modal-overlay" id="createFolderModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="cfTitle">New Folder</h3><button class="modal-close" onclick="closeModal('createFolderModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="auth-hint" style="margin:0 0 12px;" id="cfParent"></div>
+      <div class="field"><label>Folder name</label><input type="text" id="cfName" maxlength="80" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitCreateFolder();}"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('createFolderModalOverlay')">Cancel</button>
+      <button class="btn btn-orange" id="cfConfirmBtn" onclick="submitCreateFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- FOLDER PROPERTIES MODAL ---------------- -->
+<div class="modal-overlay" id="folderPropsModalOverlay">
+  <div class="modal wide">
+    <div class="modal-head"><h3>Folder Properties</h3><button class="modal-close" onclick="closeModal('folderPropsModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="perm-head"><span id="fpPath"></span></div>
+      <div class="detail-meta-grid">
+        <div><span>Folder Number</span><b id="fpFolderNo"></b></div>
+        <div><span>Created</span><span id="fpCreated" style="display:inline; text-transform:none; letter-spacing:0; font-size:13px; color:var(--text);"></span></div>
+      </div>
+      <div class="field"><label>Folder name</label><input type="text" id="fpName" maxlength="80"></div>
+      <div class="field"><label>Description</label><textarea id="fpDescription" rows="2" placeholder="What belongs in this folder&hellip;"></textarea></div>
+      <div class="form-section-title" style="margin-top:16px;">Reviewers <span class="fm-muted" style="text-transform:none; letter-spacing:0;">&mdash; review first; all must approve</span></div>
+      <div class="dual-listbox" style="margin-bottom:16px;">
+        <div class="dual-listbox-col"><label>List of Users</label><select id="fpRevAvail" multiple></select></div>
+        <div class="dual-listbox-buttons">
+          <button type="button" class="orange" onclick="moveDualListbox('fpRevAvail','fpRevSel')">&gt;</button>
+          <button type="button" class="orange" onclick="moveDualListbox('fpRevSel','fpRevAvail')">&lt;</button>
+        </div>
+        <div class="dual-listbox-col"><label>Selected Reviewers</label><select id="fpRevSel" multiple></select></div>
+      </div>
+      <div class="form-section-title">Approvers <span class="fm-muted" style="text-transform:none; letter-spacing:0;">&mdash; approve after review; all must approve, then the file is published</span></div>
+      <div class="dual-listbox">
+        <div class="dual-listbox-col"><label>List of Users</label><select id="fpAppAvail" multiple></select></div>
+        <div class="dual-listbox-buttons">
+          <button type="button" class="orange" onclick="moveDualListbox('fpAppAvail','fpAppSel')">&gt;</button>
+          <button type="button" class="orange" onclick="moveDualListbox('fpAppSel','fpAppAvail')">&lt;</button>
+        </div>
+        <div class="dual-listbox-col"><label>Selected Approvers</label><select id="fpAppSel" multiple></select></div>
+      </div>
+      <div class="auth-hint" id="fpInheritNote"></div>
+      <div class="auth-hint">Subfolders without their own reviewers/approvers inherit these. Files already in review keep the approvers they started with.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('folderPropsModalOverlay')">Close</button>
+      <button class="btn btn-orange" onclick="submitFolderProps()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- FOLDER PERMISSIONS MODAL ---------------- -->
+<div class="modal-overlay" id="folderPermModalOverlay">
+  <div class="modal wide">
+    <div class="modal-head"><h3>User Permissions</h3><button class="modal-close" onclick="closeModal('folderPermModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="perm-head"><svg class="fm-ficon" viewBox="0 0 24 18" aria-hidden="true"><path d="M1 3a2 2 0 0 1 2-2h6l2 2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z" fill="#4A7CC2"/></svg><span id="fpmPath"></span></div>
+      <div class="field" style="max-width:300px;"><label>Entity</label>
+        <select id="fpmEntity" onchange="onPermEntityChange()">
+          <option value="user">User</option>
+          <option value="role">Role</option>
+          <option value="department">Department</option>
+        </select>
+      </div>
+      <div class="dual-listbox">
+        <div class="dual-listbox-col"><label>List of Entities</label><select id="fpmAvail" multiple style="min-height:190px;"></select></div>
+        <div class="dual-listbox-buttons">
+          <button type="button" class="orange" onclick="movePermEntities('add')">&gt;</button>
+          <button type="button" class="orange" onclick="movePermEntities('remove')">&lt;</button>
+        </div>
+        <div class="dual-listbox-col"><label>Selected Entities</label><select id="fpmSel" multiple style="min-height:190px;"></select></div>
+      </div>
+      <div class="auth-hint" id="fpmSummary"></div>
+      <label class="check-row" style="margin-top:12px;"><input type="checkbox" id="fpmApplySub"> Permission applicable to subfolder(s)</label>
+    </div>
+    <div class="modal-foot" style="justify-content:center;">
+      <button class="btn btn-orange" onclick="submitFolderPerm()">Submit</button>
+      <button class="btn btn-ghost" onclick="closeModal('folderPermModalOverlay')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- ADVANCED SEARCH MODAL ---------------- -->
+<div class="modal-overlay" id="advSearchModalOverlay">
+  <div class="modal wide">
+    <div class="modal-head"><h3>Advanced Search</h3><button class="modal-close" onclick="closeModal('advSearchModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="upload-grid" style="max-width:none;">
+        <div class="field full"><label>Keyword</label><input type="text" id="asKeyword" placeholder="Drawing no., title, file name&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitAdvancedSearch();}"></div>
+        <div class="field"><label>Folder</label><select id="asFolder"></select></div>
+        <div class="field" style="display:flex; align-items:flex-end;"><label class="check-row" style="margin:0 0 10px;"><input type="checkbox" id="asIncludeSub" checked> Include subfolders</label></div>
+        <div class="field"><label>Project</label><select id="asProject"></select></div>
+        <div class="field"><label>Department</label><select id="asDepartment"></select></div>
+        <div class="field"><label>Document Category</label><select id="asCategory"></select></div>
+        <div class="field"><label>Status</label><select id="asStatus"></select></div>
+        <div class="field"><label>Uploaded By</label><select id="asUploadedBy"></select></div>
+        <div class="field"></div>
+        <div class="field"><label>Uploaded From</label><input type="date" id="asFrom"></div>
+        <div class="field"><label>Uploaded To</label><input type="date" id="asTo"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('advSearchModalOverlay')">Cancel</button>
+      <button class="btn btn-orange" onclick="submitAdvancedSearch()">Search</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
@@ -849,9 +1220,13 @@ let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 // sections (Manage Users, Master Data, Configuration) aren't part of this —
 // those are already gated by the existing admin-role check.
 const PAGE_ACCESS_ITEMS = [
+  { key: 'filesView', label: 'Files' },
   { key: 'uploadView', label: 'Upload Document' },
   { key: 'queueView', label: 'My Approval Queue' },
-  { key: 'docsView', label: 'Documents' }
+  { key: 'docsView', label: 'Documents' },
+  { key: 'defaultDirView', label: 'Default Directory' },
+  { key: 'fmReportsView', label: 'Reports' },
+  { key: 'alertsView', label: 'Alerts' }
 ];
 let STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
 
@@ -960,9 +1335,9 @@ function enterApp(){
     startListeners();
   } else {
     console.error('startListeners is not defined — app-workflow.js failed to load.');
-    alert('app-workflow.js failed to load, so the app can only show your login — Upload/Queue/Documents/Masters won\'t work. Check that app-workflow.js was uploaded in the same folder as index.html (exact filename, lowercase), then hard-refresh (Ctrl+Shift+R).');
+    alert('app-workflow.js failed to load, so the app can only show your login. Check that app-workflow.js and app-files.js were uploaded in the same folder as index.html (exact filenames, lowercase), then hard-refresh (Ctrl+Shift+R).');
   }
-  const startView = (location.hash && document.getElementById(location.hash.slice(1))) ? location.hash.slice(1) : 'uploadView';
+  const startView = (location.hash && document.getElementById(location.hash.slice(1))) ? location.hash.slice(1) : 'filesView';
   history.replaceState({ view: startView }, '', '#' + startView);
   switchView(startView, { skipHistory: true });
 }
@@ -1016,7 +1391,7 @@ function switchView(viewId, opts){
   if(!opts.skipAccessCheck && typeof canAccessPage === 'function' && !canAccessPage(viewId)){
     toast("You don't have access to that page.", 'err');
     const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
-    viewId = fallback ? fallback.key : 'uploadView';
+    viewId = fallback ? fallback.key : 'filesView';
   }
   const target = document.getElementById(viewId);
   if(!target) return;
@@ -1026,6 +1401,7 @@ function switchView(viewId, opts){
   document.getElementById('notifPanel').classList.remove('active');
   if(viewId === 'userAccessView' && typeof populateUaUserSelect === 'function') populateUaUserSelect();
   if(viewId === 'workflowConfigView' && typeof renderWorkflowConfigView === 'function') renderWorkflowConfigView();
+  if(typeof onFmViewShown === 'function') onFmViewShown(viewId);
   if(!opts.skipHistory){
     history.pushState({ view: viewId }, '', '#' + viewId);
   }
@@ -1033,7 +1409,7 @@ function switchView(viewId, opts){
 
 window.addEventListener('popstate', e => {
   if(!document.getElementById('appShell').classList.contains('active')) return; // not logged in yet
-  const viewId = (e.state && e.state.view) || (location.hash ? location.hash.slice(1) : 'uploadView');
+  const viewId = (e.state && e.state.view) || (location.hash ? location.hash.slice(1) : 'filesView');
   if(document.getElementById(viewId)) switchView(viewId, { skipHistory: true });
 });
 
@@ -1124,13 +1500,17 @@ function resetUploadForm(){
 }
 function closeDocSubmittedModal(){
   closeModal('docSubmittedModalOverlay');
-  switchView('docsView');
+  if(typeof fmLastUploadFolderId !== 'undefined' && fmLastUploadFolderId && typeof openFmFolder === 'function') openFmFolder(fmLastUploadFolderId);
+  else switchView('docsView');
 }
 
 function handleUpload(ev){
   ev.preventDefault();
   if(!selectedFile){ toast('Please choose a file to upload.', 'err'); return false; }
+  const fileIssue = validateUploadFile(selectedFile);
+  if(fileIssue){ toast(fileIssue, 'err'); return false; }
   const meta = {
+    folderId: document.getElementById('fFolder').value,
     project: document.getElementById('fProject').value,
     department: document.getElementById('fDepartment').value,
     category: document.getElementById('fCategory').value,
@@ -1138,11 +1518,14 @@ function handleUpload(ev){
     revision: document.getElementById('fRevision').value.trim(),
     title: document.getElementById('fTitle').value.trim()
   };
-  const resolved = resolveWorkflowForCategory(meta.category);
+  if(!meta.folderId){ toast('Please choose a folder.', 'err'); return false; }
+  if(!canAccessFolder(meta.folderId)){ toast("You don't have access to that folder.", 'err'); return false; }
+  const resolved = resolveWorkflowForUpload(meta.folderId, meta.category);
   if(!resolved){
-    toast(getWorkflowResolutionIssue(meta.category), 'err');
+    toast(getUploadWorkflowIssue(meta.folderId, meta.category), 'err');
     return false;
   }
+  const initialStatus = resolved.initialStatus || 'pending_review';
   const btn = document.getElementById('uploadBtn');
   btn.disabled = true; btn.textContent = 'Uploading…';
 
@@ -1177,10 +1560,11 @@ function handleUpload(ev){
             versionNo: 1, revision: meta.revision,
             fileName: selectedFile.name, fileURL: downloadURL, filePath: storagePath,
             uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
-            status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
+            status: initialStatus, currentStage: 0, steps: freshSteps(resolved.steps),
             workflowConfigName: resolved.configName,
             signedBy: null, signedAt: null, supersededBy: null,
-            docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id
+            docTitle: meta.title, docDrawingNumber: meta.drawingNumber, docProject: meta.project, docId: docRef.id,
+            docFolderId: meta.folderId
           };
           const historyRef = db.collection('documents').doc(docRef.id)
             .collection('versions').doc(versionRef.id)
@@ -1188,26 +1572,28 @@ function handleUpload(ev){
           const batch = db.batch();
           batch.set(docRef, {
             title: meta.title, drawingNumber: meta.drawingNumber, project: meta.project,
-            department: meta.department, category: meta.category,
-            currentVersionNo: 1, currentVersionId: versionRef.id, status: 'pending_review',
+            department: meta.department, category: meta.category, folderId: meta.folderId,
+            currentFileName: selectedFile.name, currentFileURL: downloadURL, currentRevision: meta.revision,
+            currentVersionNo: 1, currentVersionId: versionRef.id, status: initialStatus,
             createdBy: currentUser.uid, createdByName: currentUser.name,
             createdAt: now, updatedAt: now
           });
           batch.set(versionRef, versionData);
           batch.set(historyRef, {
             action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
-            timestamp: now, remarks: null, toStatus:'pending_review'
+            timestamp: now, remarks: null, toStatus: initialStatus
           });
           batch.commit().then(() => {
             console.log('Firestore batch committed successfully');
-            const stage0Roles = resolved.steps.filter(s => s.stage === 0).map(s => s.role);
-            notifyRoles(stage0Roles,
-              `${meta.drawingNumber} — ${meta.title} needs your review.`, docRef.id);
+            notifyTask(resolved.steps.filter(s => s.stage === 0),
+              `${meta.drawingNumber} — ${meta.title} needs your ${initialStatus === 'pending_approval' ? 'approval' : 'review'}.`, docRef.id);
+            notifySubscribers(meta.folderId, `New file in ${folderPath(meta.folderId)}: ${meta.drawingNumber} — ${meta.title}`, docRef.id);
+            fmLastUploadFolderId = meta.folderId;
             document.getElementById('uploadForm').reset();
             resetUploadForm();
             // Show success popup
             document.getElementById('docSubmittedDetails').innerHTML =
-              `<b>${escapeHtml(meta.title)}</b><br>Drawing No: ${escapeHtml(meta.drawingNumber)}<br>Workflow: ${escapeHtml(resolved.configName)} (${resolved.steps.length} step${resolved.steps.length===1?'':'s'})`;
+              `<b>${escapeHtml(meta.title)}</b><br>Folder: ${escapeHtml(folderPath(meta.folderId))}<br>Drawing No: ${escapeHtml(meta.drawingNumber)}<br>Workflow: ${escapeHtml(resolved.configName)} (${resolved.steps.length} step${resolved.steps.length===1?'':'s'})`;
             openModal('docSubmittedModalOverlay');
           }).catch(err => {
             console.error('batch.commit failed:', err.code, err.message);
@@ -1225,5 +1611,6 @@ function handleUpload(ev){
 }
 </script>
 <script src="app-workflow.js"></script>
+<script src="app-files.js"></script>
 </body>
 </html>
