@@ -61,7 +61,8 @@ let fmExpanded = new Set();
 let fmTreeFilter = '';
 let fmFolderDocs = null;
 let fmFolderDocsUnsub = null;
-let fmKmOpen = new Set();
+let fmKmOpen = new Set(['pendReview', 'pendApproval']); // items waiting on you are open by default
+let fmOverdueOnly = false;
 let fmSearchState = null;          // { crit, label, results|null }
 let fmLinksPanel = null;           // 'quick' | 'subs' | null
 let fmFilesUnsubs = [];
@@ -427,7 +428,7 @@ function stopFilesListeners(){
   myPrefs = { quickLinks: [], defaultFolderId: null }; prefsLoaded = false;
   projectSyncInFlight = new Set();
   fmActiveFolderId = null; fmExpanded = new Set(); fmTreeFilter = ''; fmFolderDocs = null;
-  fmKmOpen = new Set(); fmSearchState = null; fmLinksPanel = null; fmInitialFolderApplied = false; fmShowAllDocs = false;
+  fmKmOpen = new Set(['pendReview', 'pendApproval']); fmOverdueOnly = false; fmSearchState = null; fmLinksPanel = null; fmInitialFolderApplied = false; fmShowAllDocs = false;
   fmReportRows = null; fmActiveReport = null; fmMoveCandidates = []; fmTransferFrom = null;
   dmsParams = { ...DEFAULT_DMS_PARAMS }; emailConfig = { ...DEFAULT_EMAIL_CONFIG };
 }
@@ -566,40 +567,78 @@ function stepIsMine(v){
   return (v.steps || []).some(s => s.stage === v.currentStage && s.decision === 'pending' && isStepAssignedToMe(s));
 }
 function kmBuckets(){
-  const all = [...queueMap.values()].filter(v => canAccessDoc({ folderId: v.docFolderId, createdBy: v.uploadedBy }));
   const me = currentUser.uid;
+  const all = [...queueMap.values()].filter(v => canAccessDoc({ folderId: v.docFolderId, createdBy: v.uploadedBy }))
+    .filter(v => !fmOverdueOnly || isOverdue(v));
+  // Pending Review / Approval = items you can act on: assigned to you, or (Admin) anyone's
+  const actionable = new Set(myActionableVersions().map(v => v.id));
   return [
     { key: 'myReview',     label: 'My files under Review',      items: all.filter(v => v.uploadedBy === me && v.status === 'pending_review') },
     { key: 'myApproval',   label: 'My files awaiting Approval',  items: all.filter(v => v.uploadedBy === me && v.status === 'pending_approval') },
-    { key: 'pendReview',   label: 'Pending Review',              items: all.filter(v => v.status === 'pending_review' && stepIsMine(v)) },
-    { key: 'pendApproval', label: 'Pending Approval',            items: all.filter(v => v.status === 'pending_approval' && stepIsMine(v)) }
+    { key: 'pendReview',   label: 'Pending Review',              items: all.filter(v => v.status === 'pending_review' && actionable.has(v.id)), act: true },
+    { key: 'pendApproval', label: 'Pending Approval',            items: all.filter(v => v.status === 'pending_approval' && actionable.has(v.id)), act: true }
   ];
 }
+function renderKmStats(){
+  const mine = myActionableVersions();
+  const overdue = mine.filter(isOverdue).length;
+  const published = allDocsSnapshot.filter(d => d.status === 'published' && canAccessDoc(d)).length;
+  return `<div class="stat-row km-stats">
+    <div class="stat-card accent-gold"><div class="num">${mine.length}</div><div class="lbl">Awaiting your action</div></div>
+    <div class="stat-card accent-red clickable ${fmOverdueOnly ? 'stat-active' : ''}" onclick="toggleKmOverdueOnly()" title="Show only overdue items"><div class="num">${overdue}</div><div class="lbl">Overdue (past TAT)${fmOverdueOnly ? ' &middot; showing only these' : ''}</div></div>
+    <div class="stat-card accent-teal clickable" onclick="goToDocumentsFiltered('')" title="Open All Documents"><div class="num">${queueMap.size}</div><div class="lbl">Active in the workflow</div></div>
+    <div class="stat-card clickable" onclick="goToDocumentsFiltered('published')" title="Open All Documents &mdash; Published"><div class="num">${published}</div><div class="lbl">Published documents</div></div>
+  </div>`;
+}
+function toggleKmOverdueOnly(){ fmOverdueOnly = !fmOverdueOnly; renderFmMain(); }
 function renderFmDashboard(el){
   const buckets = kmBuckets();
   const allOpen = buckets.every(b => fmKmOpen.has(b.key));
   el.innerHTML = `
+    ${renderKmStats()}
     <div class="fm-section-head">
       <h3>Knowledge Management</h3>
       <button class="fm-link" onclick="toggleKmAll()">${allOpen ? 'Collapse All &minus;' : 'Expand All +'}</button>
     </div>
+    ${fmOverdueOnly ? `<div class="km-filter-note">Showing overdue items only. <button class="fm-link" onclick="toggleKmOverdueOnly()">Show all</button></div>` : ''}
     ${buckets.map(b => {
       const open = fmKmOpen.has(b.key);
       return `<div class="km-row" onclick="toggleKm('${b.key}')">${FOLDER_SVG_LG}<span class="km-label">${b.label}</span><span class="km-count">${b.items.length}</span><span class="km-toggle">${open ? '&minus;' : '+'}</span></div>` +
-        (open ? `<div class="km-body">${kmItemsTable(b.items)}</div>` : '');
+        (open ? `<div class="km-body">${kmItemsTable(b.items, b.act)}</div>` : '');
     }).join('')}`;
 }
-function kmItemsTable(items){
+function kmItemsTable(items, withActions){
   if(!items.length) return '<div class="fm-empty-note">Nothing here right now.</div>';
   const sorted = [...items].sort((a, b) => stageStartMs(a) - stageStartMs(b));
-  return `<table class="fm-table"><thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Uploaded By</th><th>Waiting</th></tr></thead><tbody>
-    ${sorted.map(v => `<tr onclick="openDocumentDetail('${v.docId}')">
-      <td><span class="drawing-code">${escapeHtml(v.docDrawingNumber || '—')}</span></td>
-      <td>${escapeHtml(v.docTitle || '—')}${isOverdue(v) ? ' <span class="overdue-tag">Overdue</span>' : ''}</td>
-      <td>${escapeHtml(v.docFolderId ? folderPath(v.docFolderId) : '—')}</td>
-      <td>${escapeHtml(v.uploadedByName || '—')}</td>
-      <td>${timeAgoMs(stageStartMs(v))}</td>
-    </tr>`).join('')}</tbody></table>`;
+  const assignee = s => s.uid ? userName(s.uid) : (ROLE_LABELS[s.role] || s.role);
+  return `<table class="fm-table"><thead><tr><th>Drawing No.</th><th>Title</th><th>Folder</th><th>Uploaded By</th><th>Waiting</th>${withActions ? '<th></th>' : '<th>With</th>'}</tr></thead><tbody>
+    ${sorted.map(v => {
+      const pending = (v.steps || []).filter(s => s.stage === v.currentStage && s.decision === 'pending');
+      const step = withActions ? myActionStep(v) : null;
+      const onBehalf = step && !isStepAssignedToMe(step);
+      const maxStage = Math.max(...(v.steps || []).map(s => s.stage));
+      const chips = (v.steps || []).map(s => {
+        let cls = 'pending';
+        if(s.decision === 'approved') cls = 'approved';
+        else if(s.decision === 'rejected') cls = 'rejected';
+        else if(s.stage === v.currentStage) cls = 'active-pending';
+        return `<span class="step-chip ${cls}">${escapeHtml(s.label)}</span>`;
+      }).join('');
+      return `<tr onclick="openDocumentDetail('${v.docId}')">
+        <td><span class="drawing-code">${escapeHtml(v.docDrawingNumber || '—')}</span></td>
+        <td>${escapeHtml(v.docTitle || '—')}${isOverdue(v) ? ' <span class="overdue-tag">Overdue</span>' : ''}
+          ${withActions && step ? `<div class="km-step">Your step: <b>${escapeHtml(step.label)}</b>${onBehalf ? ` &middot; on behalf of ${escapeHtml(assignee(step))}` : ''}</div>` : ''}
+          <div class="step-chip-row" style="margin-top:5px;">${chips}</div></td>
+        <td>${escapeHtml(v.docFolderId ? folderPath(v.docFolderId) : '—')}</td>
+        <td>${escapeHtml(v.uploadedByName || '—')}</td>
+        <td>${timeAgoMs(stageStartMs(v))}</td>
+        ${withActions && step ? `<td onclick="event.stopPropagation();"><div class="km-actions">
+            <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${step.key}','approved','${escapeJs(step.label)}',${step.stage === maxStage})">Approve</button>
+            <button class="btn btn-red btn-sm" onclick="openDecisionModal('${v.docId}','${v.id}','${step.key}','rejected','${escapeJs(step.label)}',${step.stage === maxStage})">Reject</button>
+          </div></td>`
+          : `<td>${escapeHtml(pending.map(assignee).join(', ') || '—')}</td>`}
+      </tr>`;
+    }).join('')}</tbody></table>`;
 }
 function toggleKm(key){ if(fmKmOpen.has(key)) fmKmOpen.delete(key); else fmKmOpen.add(key); renderFmMain(); }
 function toggleKmAll(){
