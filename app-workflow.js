@@ -30,12 +30,39 @@ function timeAgo(ts){
   if(hrs < 24) return hrs + 'h ago';
   return Math.floor(hrs/24) + 'd ago';
 }
+// When the item entered its CURRENT stage: the latest decision on an earlier
+// stage, or the upload time if it's still on the first stage.
+function stageStartMs(v){
+  let ms = v.uploadedAt && v.uploadedAt.toMillis ? v.uploadedAt.toMillis() : 0;
+  (v.steps || []).forEach(s => {
+    if(s.stage < v.currentStage && s.decidedAt && s.decidedAt.toMillis) ms = Math.max(ms, s.decidedAt.toMillis());
+  });
+  return ms;
+}
+// Turnaround time (days) per status — from Set Parameter, default 2.
+function tatDaysFor(status){
+  const p = (typeof dmsParams !== 'undefined' && dmsParams) ? dmsParams : {};
+  const v = Number(status === 'pending_approval' ? p.approvalTatDays : p.reviewTatDays);
+  return isFinite(v) && v > 0 ? v : 2;
+}
 function isOverdue(v){
-  const ms = v.uploadedAt && v.uploadedAt.toMillis ? v.uploadedAt.toMillis() : 0;
-  return ms > 0 && (Date.now() - ms) > (2*24*60*60*1000);
+  const ms = stageStartMs(v);
+  return ms > 0 && (Date.now() - ms) > tatDaysFor(v.status) * 24*60*60*1000;
+}
+function timeAgoMs(ms){ return ms ? timeAgo({ toMillis: () => ms }) : '—'; }
+// A workflow step is either assigned to a specific user (folder reviewers /
+// approvers — step.uid) or to a role (Document Category workflows — step.role).
+function isStepAssignedToMe(s){
+  if(!currentUser) return false;
+  if(s.uid) return s.uid === currentUser.uid;
+  return getUserRoles(currentUser).includes(s.role);
+}
+function stepAssigneeLabel(s){
+  if(s.uid) return (typeof userName === 'function') ? userName(s.uid) : 'a specific user';
+  return ROLE_LABELS[s.role] || s.role;
 }
 function humanizeAction(a){
-  return { uploaded:'uploaded the document', step_approved:'approved a step', step_rejected:'rejected the document', resubmitted:'submitted a revised version' }[a] || a;
+  return { uploaded:'uploaded the document', step_approved:'approved a step', step_rejected:'rejected the document', resubmitted:'submitted a revised version', moved:'moved the file', reassigned:'reassigned a pending task' }[a] || a;
 }
 // A user's EFFECTIVE roles: their primary `role` plus whatever's in their
 // `roles` array (additional roles), deduped. Deliberately does NOT special-
@@ -67,6 +94,17 @@ function notifyUser(uid, message, docId){
     forRole: null, toUid: uid, message, docId,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(), readBy: []
   });
+}
+
+// Notify whoever owns a set of workflow steps — role-based steps go to the
+// role, user-based steps (folder reviewers/approvers) go to the user — and
+// queue an email if Email Configuration has it switched on.
+function notifyTask(steps, message, docId){
+  const roles = [...new Set((steps || []).filter(s => !s.uid && s.role).map(s => s.role))];
+  const uids = [...new Set((steps || []).filter(s => s.uid).map(s => s.uid))];
+  if(roles.length) notifyRoles(roles, message, docId);
+  uids.forEach(u => notifyUser(u, message, docId));
+  if(typeof queueEmail === 'function') queueEmail('taskAssigned', { roles, uids }, message, docId);
 }
 
 let notifMap = new Map();
@@ -113,7 +151,7 @@ function renderNotifications(){
 function handleNotifClick(notifId, docId){
   db.collection('notifications').doc(notifId).update({ readBy: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
   document.getElementById('notifPanel').classList.remove('active');
-  openDocumentDetail(docId);
+  if(docId && docId !== 'null' && docId !== 'undefined') openDocumentDetail(docId);
 }
 function toggleNotifPanel(){
   document.getElementById('notifPanel').classList.toggle('active');
@@ -151,9 +189,11 @@ function listenQueue(){
   activeSessionUnsubs.push(unsub);
 }
 function renderQueue(){
+  if(!currentUser) return;
+  if(typeof onQueueDataChanged === 'function') onQueueDataChanged();
   const myRoles = getUserRoles(currentUser);
   let mine = Array.from(queueMap.values()).filter(v =>
-    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (myRoles.includes(s.role) || currentUser.role === 'admin'))
+    (v.steps||[]).some(s => s.stage === v.currentStage && s.decision === 'pending' && (isStepAssignedToMe(s) || currentUser.role === 'admin'))
   );
   mine.sort((a,b) => ((a.uploadedAt&&a.uploadedAt.toMillis)?a.uploadedAt.toMillis():0) - ((b.uploadedAt&&b.uploadedAt.toMillis)?b.uploadedAt.toMillis():0));
 
@@ -165,7 +205,7 @@ function renderQueue(){
   const publishedCount = allDocsSnapshot.filter(d => d.status === 'published').length;
   document.getElementById('queueStats').innerHTML = `
     <div class="stat-card accent-gold"><div class="num">${mine.length}</div><div class="lbl">Awaiting your action</div></div>
-    <div class="stat-card accent-red clickable ${queueShowOverdueOnly?'stat-active':''}" onclick="toggleOverdueOnly()"><div class="num">${overdueCount}</div><div class="lbl">Overdue &gt; 2 days${queueShowOverdueOnly?' &middot; showing only these':''}</div></div>
+    <div class="stat-card accent-red clickable ${queueShowOverdueOnly?'stat-active':''}" onclick="toggleOverdueOnly()"><div class="num">${overdueCount}</div><div class="lbl">Overdue (past TAT)${queueShowOverdueOnly?' &middot; showing only these':''}</div></div>
     <div class="stat-card accent-teal clickable" onclick="goToDocumentsFiltered('')"><div class="num">${queueMap.size}</div><div class="lbl">Active in the workflow</div></div>
     <div class="stat-card clickable" onclick="goToDocumentsFiltered('published')"><div class="num">${publishedCount}</div><div class="lbl">Published documents</div></div>`;
 
@@ -174,12 +214,13 @@ function renderQueue(){
   if(mine.length === 0){
     const myRoleNames = myRoles.map(r => ROLE_LABELS[r] || r).join(', ');
     list.innerHTML = queueShowOverdueOnly
-      ? `<div class="empty-state"><div class="ic">&#9989;</div><b>Nothing overdue</b><div>None of your pending items are over 2 days old. <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="toggleOverdueOnly()">Show all</button></div></div>`
-      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on your ${escapeHtml(myRoleNames)} approval right now.</div></div>`;
+      ? `<div class="empty-state"><div class="ic">&#9989;</div><b>Nothing overdue</b><div>None of your pending items are past their review/approval TAT. <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="toggleOverdueOnly()">Show all</button></div></div>`
+      : `<div class="empty-state"><div class="ic">&#9989;</div><b>Queue clear</b><div>Nothing is waiting on you right now.</div></div>`;
     return;
   }
   list.innerHTML = mine.map(v => {
-    const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && (myRoles.includes(s.role) || currentUser.role === 'admin'));
+    const myStep = v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && isStepAssignedToMe(s))
+      || v.steps.find(s => s.stage === v.currentStage && s.decision === 'pending' && currentUser.role === 'admin');
     const maxStage = Math.max(...v.steps.map(s => s.stage));
     const isFinal = myStep.stage === maxStage;
     const overdue = isOverdue(v);
@@ -193,7 +234,7 @@ function renderQueue(){
     return `<div class="queue-card ${overdue?'overdue':''}">
       <div class="queue-main">
         <div class="queue-title-row"><h4>${escapeHtml(v.docTitle)}</h4><span class="drawing-code">${escapeHtml(v.docDrawingNumber)}</span></div>
-        <div class="queue-meta">${escapeHtml(v.docProject)} &middot; Uploaded by <b>${escapeHtml(v.uploadedByName)}</b> &middot; ${timeAgo(v.uploadedAt)}${overdue?' &middot; <span class="overdue-tag">Overdue</span>':''}</div>
+        <div class="queue-meta">${v.docFolderId && typeof folderPath === 'function' ? `&#128193; ${escapeHtml(folderPath(v.docFolderId))} &middot; ` : ''}${escapeHtml(v.docProject)} &middot; Uploaded by <b>${escapeHtml(v.uploadedByName)}</b> &middot; ${timeAgo(v.uploadedAt)}${overdue?' &middot; <span class="overdue-tag">Overdue</span>':''}</div>
         <div class="step-chip-row">${chips}</div>
       </div>
       <div class="queue-actions">
@@ -217,12 +258,13 @@ function listenAllDocuments(){
     refreshMasterDataPanels(); // "in use" status depends on this data
   }, err => {
     console.error('documents listener:', err);
-    document.getElementById('docsTableBody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load documents</b></div></td></tr>`;
+    document.getElementById('docsTableBody').innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>Could not load documents</b></div></td></tr>`;
   });
   activeSessionUnsubs.push(unsub);
 }
-let docFilters = { project: '', department: '', category: '', status: '' };
+let docFilters = { folder: '', project: '', department: '', category: '', status: '' };
 function applyDocFilters(){
+  docFilters.folder = document.getElementById('filterFolder') ? document.getElementById('filterFolder').value : '';
   docFilters.project = document.getElementById('filterProject').value;
   docFilters.department = document.getElementById('filterDepartment').value;
   docFilters.category = document.getElementById('filterCategory').value;
@@ -230,21 +272,22 @@ function applyDocFilters(){
   renderDocsTable();
 }
 function clearDocFilters(){
-  docFilters = { project: '', department: '', category: '', status: '' };
+  docFilters = { folder: '', project: '', department: '', category: '', status: '' };
+  if(document.getElementById('filterFolder')) document.getElementById('filterFolder').value = '';
   document.getElementById('filterProject').value = '';
   document.getElementById('filterDepartment').value = '';
   document.getElementById('filterCategory').value = '';
   document.getElementById('filterStatus').value = '';
   renderDocsTable();
 }
-// Jump to Documents pre-filtered by status — used by the clickable stat
+// Jump to Files > All Documents pre-filtered by status — used by the clickable stat
 // cards on My Approval Queue (e.g. "Published documents").
 function goToDocumentsFiltered(statusKey){
   clearDocFilters();
   docFilters.status = statusKey || '';
   const sel = document.getElementById('filterStatus');
   if(sel) sel.value = docFilters.status;
-  switchView('docsView');
+  if(typeof openFmAllDocs === 'function') openFmAllDocs();
   renderDocsTable();
 }
 
@@ -259,24 +302,36 @@ function populateStatusFilterOptions(){
 
 function renderDocsTable(){
   const body = document.getElementById('docsTableBody');
-  const filtered = allDocsSnapshot.filter(d =>
+  if(!body || !currentUser) return;
+  const visibleDocs = allDocsSnapshot.filter(d => typeof canAccessDoc === 'function' ? canAccessDoc(d) : true);
+  const limitNote = document.getElementById('docsLimitNote');
+  if(limitNote) limitNote.classList.toggle('hidden', allDocsSnapshot.length < 100);
+  const inFolder = d => {
+    if(!docFilters.folder) return true;
+    if(docFilters.folder === '__unfiled__') return !d.folderId;
+    if(d.folderId === docFilters.folder) return true;
+    return typeof descendantIds === 'function' && descendantIds(docFilters.folder).includes(d.folderId);
+  };
+  const filtered = visibleDocs.filter(d =>
+    inFolder(d) &&
     (!docFilters.project || d.project === docFilters.project) &&
     (!docFilters.department || d.department === docFilters.department) &&
     (!docFilters.category || d.category === docFilters.category) &&
     (!docFilters.status || d.status === docFilters.status)
   );
-  if(allDocsSnapshot.length === 0){
-    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128193;</div><b>No documents yet</b><div>Upload the first one from the Upload Document tab.</div></div></td></tr>`;
+  if(visibleDocs.length === 0){
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="ic">&#128193;</div><b>No documents yet</b><div>Open a folder and click <b>+ Upload</b>.</div></div></td></tr>`;
     return;
   }
   if(filtered.length === 0){
-    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128269;</div><b>No documents match these filters</b><div><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="clearDocFilters()">Clear filters</button></div></div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="ic">&#128269;</div><b>No documents match these filters</b><div><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="clearDocFilters()">Clear filters</button></div></div></td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(d => `
     <tr onclick="openDocumentDetail('${d.id}')">
       <td><span class="drawing-code">${escapeHtml(d.drawingNumber||'—')}</span></td>
       <td>${escapeHtml(d.title||'—')}</td>
+      <td>${escapeHtml(typeof folderPath === 'function' ? folderPath(d.folderId) : '—')}</td>
       <td>${escapeHtml(d.project||'—')}</td>
       <td>v${d.currentVersionNo||1}</td>
       <td><span class="badge st-${d.status}"><span class="dot"></span>${STATUS_LABELS[d.status]||d.status}</span></td>
@@ -293,12 +348,19 @@ function openDocumentDetail(docId){
   document.getElementById('detailBody').innerHTML = `<div class="empty-state"><b>Loading&hellip;</b></div>`;
   openModal('detailModalOverlay');
   Promise.all([ docRef.get(), docRef.collection('versions').orderBy('versionNo','desc').get() ])
+    .catch(err => { document.getElementById('detailBody').innerHTML = `<div class="empty-state"><b>Could not open this document</b><div>${escapeHtml(err.message)}</div></div>`; return [null, null]; })
     .then(([docSnap, versionsSnap]) => {
+      if(!docSnap) return;
       if(!docSnap.exists){
         document.getElementById('detailBody').innerHTML = '<div class="empty-state"><b>Document not found</b></div>';
         return;
       }
       const docData = docSnap.data();
+      if(typeof canAccessDoc === 'function' && !canAccessDoc(docData)){
+        document.getElementById('detailTitle').textContent = 'Restricted';
+        document.getElementById('detailBody').innerHTML = `<div class="empty-state"><div class="ic">&#128274;</div><b>You don't have access to this folder</b><div>Ask an Admin to add you under the folder's Permissions.</div></div>`;
+        return;
+      }
       const versions = versionsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const latest = versions[0];
       document.getElementById('detailTitle').textContent = `${docData.drawingNumber} — ${docData.title}`;
@@ -330,7 +392,7 @@ function renderDetail(docData, versions, latest, history){
   const stepRows = latest.steps.map(s => {
     let rowCls = s.decision !== 'pending' ? s.decision : (latest.status !== 'rejected' && s.stage === latest.currentStage ? 'active' : 'pending');
     const canAct = latest.status !== 'rejected' && latest.status !== 'published' && s.decision === 'pending' &&
-      s.stage === latest.currentStage && (myRolesForDetail.includes(s.role) || currentUser.role === 'admin');
+      s.stage === latest.currentStage && (isStepAssignedToMe(s) || currentUser.role === 'admin');
     const isFinal = s.stage === maxStage;
     const icon = s.decision === 'approved' ? '&#10003;' : s.decision === 'rejected' ? '&#10007;' : (rowCls === 'active' ? '&#8987;' : '&hellip;');
     let extra;
@@ -338,7 +400,7 @@ function renderDetail(docData, versions, latest, history){
       extra = `<div class="m">${s.decision === 'approved' ? 'Approved' : 'Rejected'} by <b>${escapeHtml(s.decidedByName||'')}</b> &middot; ${timeAgo(s.decidedAt)}</div>`;
       if(s.remarks) extra += `<div class="remarks">${escapeHtml(s.remarks)}</div>`;
     } else {
-      extra = `<div class="m">Assigned to ${escapeHtml(ROLE_LABELS[s.role]||s.role)}${currentUser.role==='admin'?' <span style="color:var(--gold);">(admin override available)</span>':''}</div>`;
+      extra = `<div class="m">Assigned to ${escapeHtml(stepAssigneeLabel(s))}${currentUser.role==='admin'?' <span style="color:var(--gold);">(admin override available)</span>':''}</div>`;
     }
     const actions = canAct ? `<div class="step-row-actions">
         <button class="btn btn-teal btn-sm" onclick="openDecisionModal('${activeDocId}','${latest.id}','${s.key}','approved','${escapeJs(s.label)}',${isFinal})">Approve</button>
@@ -369,10 +431,12 @@ function renderDetail(docData, versions, latest, history){
 
   document.getElementById('detailBody').innerHTML = `
     <div class="detail-meta-grid">
+      <div><span>Folder</span>${escapeHtml(typeof folderPath === 'function' ? folderPath(docData.folderId) : '—')}</div>
       <div><span>Project</span>${escapeHtml(docData.project)}</div>
       <div><span>Department</span>${escapeHtml(docData.department)}</div>
       <div><span>Category</span>${escapeHtml(docData.category)}</div>
       <div><span>Current Revision</span>${escapeHtml(latest.revision)}</div>
+      <div><span>File</span><a href="${escapeHtml(latest.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${escapeHtml(latest.fileName||'Open')} &#8599;</a></div>
       <div><span>Uploaded By</span>${escapeHtml(latest.uploadedByName)}</div>
       <div><span>Status</span><span class="badge st-${latest.status}"><span class="dot"></span>${STATUS_LABELS[latest.status]}</span></div>
     </div>
@@ -482,14 +546,17 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
     return { newStatus, newStage, published, steps, docTitle: v.docTitle, docDrawingNumber: v.docDrawingNumber, uploadedBy: v.uploadedBy, decision };
   })).then(result => {
     if(result.decision === 'rejected'){
-      notifyUser(result.uploadedBy, `${result.docDrawingNumber} — ${result.docTitle} was rejected. See remarks and resubmit.`, docId);
+      const msgR = `${result.docDrawingNumber} — ${result.docTitle} was rejected. See remarks and resubmit.`;
+      notifyUser(result.uploadedBy, msgR, docId);
+      if(typeof queueEmail === 'function') queueEmail('rejected', { uids: [result.uploadedBy] }, msgR, docId);
       toast('Document rejected. The uploader has been notified.', 'ok');
     } else if(result.published){
-      notifyUser(result.uploadedBy, `${result.docDrawingNumber} — ${result.docTitle} has been approved and published.`, docId);
+      const msgP = `${result.docDrawingNumber} — ${result.docTitle} has been approved and published.`;
+      notifyUser(result.uploadedBy, msgP, docId);
+      if(typeof queueEmail === 'function') queueEmail('published', { uids: [result.uploadedBy] }, msgP, docId);
       toast('Approved, signed, and published.', 'ok');
     } else if(result.newStatus === 'pending_approval'){
-      const nextRoles = result.steps.filter(s => s.stage === result.newStage).map(s => s.role);
-      notifyRoles(nextRoles, `${result.docDrawingNumber} — ${result.docTitle} is ready for your approval.`, docId);
+      notifyTask(result.steps.filter(s => s.stage === result.newStage), `${result.docDrawingNumber} — ${result.docTitle} is ready for your approval.`, docId);
       toast('Step approved — document advanced to the next stage.', 'ok');
     } else {
       toast('Step approved. Waiting on the parallel reviewer.', 'ok');
@@ -527,6 +594,8 @@ function openResubmitModal(docId){
 }
 function submitResubmission(){
   if(!resubFile){ toast('Please choose a file.', 'err'); return; }
+  const fileIssue = typeof validateUploadFile === 'function' ? validateUploadFile(resubFile) : null;
+  if(fileIssue){ toast(fileIssue, 'err'); return; }
   const revision = document.getElementById('resubRevision').value.trim();
   if(!revision){ toast('Please enter a revision label.', 'err'); return; }
 
@@ -536,9 +605,11 @@ function submitResubmission(){
 
   docRef.get().then(docSnap => {
     const docData = docSnap.data();
-    const resolved = resolveWorkflowForCategory(docData.category);
+    const resolved = typeof resolveWorkflowForUpload === 'function'
+      ? resolveWorkflowForUpload(docData.folderId, docData.category)
+      : resolveWorkflowForCategory(docData.category);
     if(!resolved){
-      toast(getWorkflowResolutionIssue(docData.category), 'err');
+      toast(typeof getUploadWorkflowIssue === 'function' ? getUploadWorkflowIssue(docData.folderId, docData.category) : getWorkflowResolutionIssue(docData.category), 'err');
       btn.disabled = false; btn.textContent = 'Submit Revised Version';
       return;
     }
@@ -558,20 +629,22 @@ function submitResubmission(){
           const versionData = {
             versionNo: newVersionNo, revision, fileName: resubFile.name, fileURL: url, filePath: storagePath,
             uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: ts,
-            status: 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
+            status: resolved.initialStatus || 'pending_review', currentStage: 0, steps: freshSteps(resolved.steps),
             workflowConfigName: resolved.configName,
             signedBy: null, signedAt: null, supersededBy: null,
-            docTitle: docData.title, docDrawingNumber: docData.drawingNumber, docProject: docData.project, docId: activeDocId
+            docTitle: docData.title, docDrawingNumber: docData.drawingNumber, docProject: docData.project, docId: activeDocId,
+            docFolderId: docData.folderId || null
           };
           const batch = db.batch();
           batch.set(newVersionRef, versionData);
           batch.update(oldVersionDoc.ref, { supersededBy: newVersionRef.id });
-          batch.update(docRef, { currentVersionNo: newVersionNo, currentVersionId: newVersionRef.id, status: 'pending_review', updatedAt: ts });
+          batch.update(docRef, { currentVersionNo: newVersionNo, currentVersionId: newVersionRef.id, status: versionData.status,
+            currentFileName: resubFile.name, currentFileURL: url, currentRevision: revision, updatedAt: ts });
           batch.set(newVersionRef.collection('history').doc(), {
-            action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null, toStatus: 'pending_review'
+            action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null, toStatus: versionData.status
           });
           batch.commit().then(() => {
-            notifyRoles(resolved.steps.filter(s => s.stage === 0).map(s => s.role), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);
+            notifyTask(resolved.steps.filter(s => s.stage === 0), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);
             toast('Revised version submitted for review.', 'ok');
             closeModal('resubmitModalOverlay');
             btn.disabled = false; btn.textContent = 'Submit Revised Version';
@@ -596,6 +669,7 @@ const MASTER_TYPES = [
   { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
+    // Each project (and sub-item) automatically gets a folder in Files — see syncProjectFolders() in app-files.js
     inUseMessage: 'This project is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
   { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect','editUserDept'],
@@ -621,6 +695,7 @@ function listenMasters(){
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
       refreshMasterDataPanels();
       if(mt.key === 'categoryMasters' && currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
+      if(mt.key === 'projectMasters' && typeof onProjectMastersChanged === 'function') onProjectMastersChanged();
     }, err => console.error(mt.key + ' listener:', err));
     // Only track for teardown when running post-login (masters also load
     // pre-login for the old registration screen's use case — harmless to
@@ -959,7 +1034,7 @@ function seedDefaultRoles(){
    WORKFLOW CONFIGURATIONS (admin edits; live for everyone)
    Each Document Category gets its own workflow automatically — no
    separate "create a workflow" step. The list page shows one row per
-   Document Category (from Manage Document Categories) plus a Default row
+   Document Category (from Masters &rarr; Document Category Master) plus a Default row
    for any category without its own steps; clicking a row opens that
    category's Role/From-To Status mapping table directly. Steps are keyed
    by `category` (an empty string means the Default workflow).
@@ -1071,7 +1146,14 @@ function updateUploadWorkflowHint(){
   const el = document.getElementById('uploadWorkflowHint');
   if(!el) return;
   const category = document.getElementById('fCategory') ? document.getElementById('fCategory').value : '';
-  if(!category){ el.innerHTML = ''; return; }
+  const folderId = document.getElementById('fFolder') ? document.getElementById('fFolder').value : '';
+  const byFolder = folderId && typeof resolveWorkflowForFolder === 'function' ? resolveWorkflowForFolder(folderId) : null;
+  if(byFolder){
+    const rv = byFolder.steps.filter(s => s.key.startsWith('rv_')).length, ap = byFolder.steps.filter(s => s.key.startsWith('ap_')).length;
+    el.innerHTML = `Workflow: <b>${escapeHtml(byFolder.configName)}</b> &mdash; ${rv} reviewer(s) &rarr; ${ap} approver(s)`;
+    return;
+  }
+  if(!category){ el.innerHTML = folderId ? 'This folder has no reviewers/approvers, so the Document Category workflow will be used.' : ''; return; }
   const resolved = resolveWorkflowForCategory(category);
   if(resolved){
     el.innerHTML = `Workflow: <b>${escapeHtml(resolved.configName)}</b> (${resolved.steps.length} step${resolved.steps.length === 1 ? '' : 's'})`;
@@ -1099,7 +1181,7 @@ function renderWorkflowConfigList(panel){
       </tr>`;
     }).join('');
   panel.innerHTML = `<table><thead><tr><th>Document Category</th><th>Steps</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-       <div class="auth-hint" style="margin-top:14px;">Categories come from <b>Manage Document Categories</b> — add one there and it shows up here automatically.</div>`;
+       <div class="auth-hint" style="margin-top:14px;">Categories come from <b>Masters &rarr; Document Category Master</b> — add one there and it shows up here automatically.</div>`;
 }
 
 function renderWorkflowConfigDetail(panel){
@@ -1376,6 +1458,7 @@ function listenUsers(){
       renderRolesMasterView(); // role "in use" status depends on this data
       renderUserAccessPanel(); // re-render if a user is already selected
     }
+    if(typeof onFmUsersChanged === 'function') onFmUsersChanged();
   }, err => console.error('users listener:', err));
   activeSessionUnsubs.push(unsub);
 }
@@ -1572,9 +1655,10 @@ function applyPageAccessToNav(){
     if(item.key === activeViewId && !allowed) activeViewNowHidden = true;
   });
   if(activeViewNowHidden){
-    const fallback = PAGE_ACCESS_ITEMS.find(i => canAccessPage(i.key));
-    switchView(fallback ? fallback.key : 'uploadView');
+    const fallback = PAGE_ACCESS_ITEMS.find(i => document.getElementById(i.key) && canAccessPage(i.key));
+    switchView(fallback ? fallback.key : 'filesView');
   }
+  if(typeof renderFmMain === 'function') renderFmMain(); // folder Upload button follows page access
 }
 
 function populateUaUserSelect(){
@@ -1650,7 +1734,7 @@ function renderUserAccessPanel(){
       <div class="card" style="padding:16px;">
         <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:12px;">Project Access</div>
         <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:8px;">Projects this user is staffed on:</div>
-        ${projectCheckboxes || '<div class="master-empty">No projects in Manage Projects yet.</div>'}
+        ${projectCheckboxes || '<div class="master-empty">No projects in Masters &rarr; Project Master yet.</div>'}
       </div>
     </div>
     <div class="card" style="padding:16px; margin-bottom:16px;">
@@ -1719,10 +1803,12 @@ function startListeners(){
   listenPageAccess();
   listenUserPageAccess();
   listenUsers();
+  if(typeof startFilesListeners === 'function') startFilesListeners();
   refreshMasterDataPanels(); // in case this admin's panels were open before this fired
 }
 
 function stopSessionListeners(){
+  if(typeof stopFilesListeners === 'function') stopFilesListeners();
   activeSessionUnsubs.forEach(unsub => { try{ unsub(); }catch(e){} });
   activeSessionUnsubs = [];
   queueMap = new Map();
