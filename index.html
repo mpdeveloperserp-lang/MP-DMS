@@ -404,6 +404,13 @@
   .km-label{flex:1; font-weight:700; color:var(--navy); font-size:14px;}
   .km-count{font-weight:700; font-size:14px; min-width:30px; text-align:right; color:var(--text);}
   .km-toggle{width:22px; text-align:center; color:var(--text-muted); font-size:17px;}
+  .km-stats{margin:4px 0 14px;}
+  .km-stats .stat-card{padding:12px 16px;}
+  .km-stats .stat-card .num{font-size:22px;}
+  .km-actions{display:flex; gap:6px; justify-content:flex-end; flex-wrap:nowrap;}
+  .km-step{font-size:11.5px; color:var(--text-muted); margin-top:3px;}
+  .km-step b{color:var(--gold);}
+  .km-filter-note{font-size:12px; color:var(--red); margin:-4px 0 10px; display:flex; gap:10px; align-items:center;}
   .km-body{padding:6px 0 12px 54px; border-bottom:1px solid var(--border);}
   .fm-table{width:100%; border-collapse:collapse;}
   .fm-table thead th{background:#EAF1FB; color:var(--navy); font-size:11px; text-transform:none; letter-spacing:0; font-weight:700;}
@@ -500,8 +507,7 @@
 
   <div class="sidebar">
     <div class="nav-group-label">Document Management</div>
-    <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files</button>
-    <button class="nav-item" data-view="queueView" onclick="switchView('queueView')"><span class="ic">&#9998;</span> My Approval Queue<span class="nav-badge hidden" id="queueBadge">0</span></button>
+    <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files<span class="nav-badge hidden" id="queueBadge" title="Files waiting for your review/approval">0</span></button>
     <button class="nav-item" data-view="defaultDirView" onclick="switchView('defaultDirView')"><span class="ic">&#127968;</span> Default Directory</button>
     <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
     <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
@@ -584,16 +590,6 @@
       </div>
       <div class="subview-empty" id="configEmpty">Select a configuration to open it.</div>
       <div id="configHost"></div>
-    </div>
-
-    <!-- ---------------- QUEUE VIEW ---------------- -->
-    <div class="view" id="queueView">
-      <div class="view-head"><h2>My Approval Queue</h2></div>
-      <div class="view-sub" id="queueSub">Items awaiting your action, based on your role.</div>
-      <div class="stat-row" id="queueStats"></div>
-      <div class="queue-list" id="queueList">
-        <div class="empty-state"><div class="ic">&#8987;</div><b>Loading&hellip;</b></div>
-      </div>
     </div>
 
     <!-- ---------------- DEFAULT DIRECTORY VIEW ---------------- -->
@@ -1240,7 +1236,6 @@ let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 const PAGE_ACCESS_ITEMS = [
   { key: 'filesView', label: 'Files' },
   { key: 'uploadView', label: 'Upload (button in folders)' },
-  { key: 'queueView', label: 'My Approval Queue' },
   { key: 'defaultDirView', label: 'Default Directory' },
   { key: 'fmReportsView', label: 'Reports' },
   { key: 'alertsView', label: 'Alerts' }
