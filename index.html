@@ -456,6 +456,20 @@
   .sig-sheet-line{font-size:12.5px; margin-top:8px;}
   .sig-sheet-line a{color:var(--gold-bright); font-weight:600;}
   .sig-sheet-line.err{color:var(--red);}
+  .doc-page-head{display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;}
+  .doc-page-head h2{font-size:20px; flex:1; min-width:200px;}
+  .doc-page-card{margin-bottom:16px;}
+  #docDetailView .detail-meta-grid{grid-template-columns:repeat(4, minmax(0,1fr)); margin-bottom:6px;}
+  .doc-section-title{font-size:12px; margin:0 0 8px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;}
+  .doc-section-head{font-size:15px; color:var(--navy); text-transform:none; letter-spacing:0; font-family:var(--display); margin:22px 0 8px;}
+  .doc-table{width:100%; border-collapse:collapse;}
+  .doc-table th{background:#EAF1FB; color:var(--navy); font-size:12px; font-weight:700; text-transform:none; letter-spacing:0; padding:9px 10px; border:1px solid #D6E2F3; text-align:center;}
+  .doc-table td{font-size:12.5px; padding:9px 10px; border:1px solid var(--border); vertical-align:top;}
+  .doc-table tr.cur td{background:#FFFBF5;}
+  .doc-table a{color:var(--navy-soft); text-decoration:none; font-weight:500;}
+  .doc-table a:hover{text-decoration:underline;}
+  .doc-cur-tag{font-size:10px; font-weight:700; color:var(--gold); background:var(--gold-soft); padding:1px 7px; border-radius:9px; margin-left:4px;}
+  @media (max-width: 880px){ #docDetailView .detail-meta-grid{grid-template-columns:1fr 1fr;} }
   .check-row{display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:9px;}
   .check-row input{width:auto !important;}
 
@@ -516,7 +530,7 @@
 
   <div class="sidebar">
     <div class="nav-group-label">Document Management</div>
-    <button class="nav-item active" data-view="filesView" onclick="switchView('filesView')"><span class="ic">&#128194;</span> Files<span class="nav-badge hidden" id="queueBadge" title="Files waiting for your review/approval">0</span></button>
+    <button class="nav-item active" data-view="filesView" onclick="openFmDashboard()"><span class="ic">&#128194;</span> Files<span class="nav-badge hidden" id="queueBadge" title="Files waiting for your review/approval">0</span></button>
     <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
     <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
@@ -600,6 +614,16 @@
       <div id="configHost"></div>
     </div>
 
+    <!-- ---------------- DOCUMENT PAGE (#doc=<id>) ---------------- -->
+    <div class="view" id="docDetailView">
+      <div class="doc-page-head">
+        <button class="btn btn-ghost btn-sm" onclick="closeDocPage()">&larr; Back</button>
+        <h2 id="detailTitle">Document</h2>
+        <a class="fm-link" id="detailNewTab" href="#" target="_blank" rel="noopener" title="Open this document in a new browser tab">Open in new tab &#8599;</a>
+      </div>
+      <div id="detailBody"></div>
+    </div>
+
     <!-- ---------------- REPORTS VIEW ---------------- -->
     <div class="view" id="fmReportsView">
       <div class="view-head"><h2>Reports</h2></div>
@@ -647,7 +671,7 @@
             <div class="field"><label>Folder number digits</label><input type="number" id="spFolderDigits" min="1" max="12"><div class="auth-hint" style="margin-top:5px;">e.g. 7 shows folder 31 as 0000031.</div></div>
             <div class="field"><label>Review TAT (days)</label><input type="number" id="spReviewTat" min="0" max="365"></div>
             <div class="field"><label>Approval TAT (days)</label><input type="number" id="spApprovalTat" min="0" max="365"></div>
-            <div class="field full"><label class="check-row" style="margin:0;"><input type="checkbox" id="spSigSheet"> Add a signature sheet (names, roles, dates &amp; signatures of everyone who approved) as the last page of published PDF/image files</label></div>
+            <div class="field full"><label class="check-row" style="margin:0;"><input type="checkbox" id="spSigSheet"> Add a signature sheet (names, roles, dates &amp; signatures of everyone who approved) as the first page of published PDF/image files</label></div>
             <div class="full"><button class="btn btn-orange" type="submit">Save Parameters</button></div>
           </div>
         </form>
@@ -809,12 +833,6 @@
 </div>
 
 <!-- ---------------- DOCUMENT DETAIL MODAL ---------------- -->
-<div class="modal-overlay" id="detailModalOverlay">
-  <div class="modal wide">
-    <div class="modal-head"><h3 id="detailTitle">Document</h3><button class="modal-close" onclick="closeModal('detailModalOverlay')">&times;</button></div>
-    <div class="modal-body" id="detailBody"></div>
-  </div>
-</div>
 
 <!-- ---------------- DECISION MODAL (approve/reject remarks) ---------------- -->
 <div class="modal-overlay" id="decisionModalOverlay">
@@ -1348,9 +1366,7 @@ function enterApp(){
     console.error('startListeners is not defined — app-workflow.js failed to load.');
     alert('app-workflow.js failed to load, so the app can only show your login. Check that app-workflow.js and app-files.js were uploaded in the same folder as index.html (exact filenames, lowercase), then hard-refresh (Ctrl+Shift+R).');
   }
-  const startView = (location.hash && document.getElementById(location.hash.slice(1))) ? location.hash.slice(1) : 'filesView';
-  history.replaceState({ view: startView }, '', '#' + startView);
-  switchView(startView, { skipHistory: true });
+  routeTo(history.state, location.hash, true); // open whatever the address points to (folder, document, page)
 }
 function initials(name){
   return (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase();
@@ -1411,14 +1427,35 @@ function switchView(viewId, opts){
   const hostId = target.dataset.host || (SUBVIEW_GROUPS[viewId] ? viewId : null);
   if(target.dataset.host) document.getElementById(target.dataset.host).classList.add('active');
   if(hostId) syncSubViewPicker(hostId, target.dataset.host ? viewId : '');
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === viewId || (!!hostId && b.dataset.view === hostId)));
+  const navId = viewId === 'docDetailView' ? 'filesView' : viewId;
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === navId || (!!hostId && b.dataset.view === hostId)));
   document.getElementById('notifPanel').classList.remove('active');
   if(viewId === 'userAccessView' && typeof populateUaUserSelect === 'function') populateUaUserSelect();
   if(viewId === 'workflowConfigView' && typeof renderWorkflowConfigView === 'function') renderWorkflowConfigView();
   if(typeof onFmViewShown === 'function') onFmViewShown(viewId);
-  if(!opts.skipHistory){
-    history.pushState({ view: viewId }, '', '#' + viewId);
-  }
+  if(!opts.skipHistory) navPush({ view: viewId }, '#' + viewId, !!opts.replace);
+}
+
+/* ---------- Browser Back / Forward ----------
+   Every place has its own address, so Back/Forward, refresh and links work:
+     #filesView (dashboard)  #folder=<id>  #alldocs  #search  #doc=<id>  #<pageId>
+   navPush adds a history entry (or replaces the current one). */
+function navPush(state, hash, replace){
+  if(replace || location.hash === hash) history.replaceState(state, '', hash);
+  else history.pushState(state, '', hash);
+}
+function routeTo(state, hash, initial){
+  const h = String(hash || '').replace(/^#/, '');
+  const st = state || {};
+  const mode = initial ? 'replace' : 'none';
+  const docId = st.doc || (h.startsWith('doc=') ? decodeURIComponent(h.slice(4)) : null);
+  if(docId){ openDocumentDetail(docId, { history: mode, direct: initial || !!st.direct }); return; }
+  const folderId = st.folder || (h.startsWith('folder=') ? decodeURIComponent(h.slice(7)) : null);
+  if(folderId){ openFmFolder(folderId, { history: mode }); return; }
+  if(h === 'alldocs'){ openFmAllDocs({ history: mode }); return; }
+  if(h === 'search' && st.crit){ runFmSearch(st.crit, st.label, { history: mode }); return; }
+  if(!h || h === 'filesView' || h === 'search' || !document.getElementById(h) || h === 'docDetailView'){ openFmDashboard({ history: mode }); return; }
+  switchView(h, { skipHistory: !initial, replace: initial });
 }
 
 /* ---------- Masters / Configurations: one page each, pick from a dropdown ----------
@@ -1472,8 +1509,8 @@ function syncSubViewPicker(hostId, subId){
 
 window.addEventListener('popstate', e => {
   if(!document.getElementById('appShell').classList.contains('active')) return; // not logged in yet
-  const viewId = (e.state && e.state.view) || (location.hash ? location.hash.slice(1) : 'filesView');
-  if(document.getElementById(viewId)) switchView(viewId, { skipHistory: true });
+  document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active')); // Back closes any open dialog
+  routeTo(e.state, location.hash, false);
 });
 
 /* ============================================================
@@ -1644,7 +1681,8 @@ function handleUpload(ev){
           batch.set(versionRef, versionData);
           batch.set(historyRef, {
             action:'uploaded', actor: currentUser.uid, actorName: currentUser.name,
-            timestamp: now, remarks: null, toStatus: initialStatus
+            timestamp: now, remarks: null, fromStatus: null, toStatus: initialStatus,
+            allocatedTo: resolved.steps.filter(s => s.stage === 0).map(stepAssigneeLabel).join(', ')
           });
           batch.commit().then(() => {
             console.log('Firestore batch committed successfully');

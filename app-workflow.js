@@ -324,19 +324,37 @@ function renderDocsTable(){
 }
 
 /* ============================================================
-   DOCUMENT DETAIL MODAL
+   DOCUMENT PAGE  (#doc=<id>) — a full page, not a popup
+   opts.history: 'push' (default) | 'replace' | 'none'
+   opts.direct:  page was opened straight from a link / refresh
 ============================================================ */
-function openDocumentDetail(docId){
+function isDocPageOpen(){ const v = document.getElementById('docDetailView'); return !!v && v.classList.contains('active'); }
+function refreshDocPage(docId){ if(isDocPageOpen() && activeDocId === docId) openDocumentDetail(docId, { history: 'none' }); }
+function closeDocPage(){
+  if(history.state && history.state.doc && !history.state.direct) history.back();
+  else if(typeof openFmDashboard === 'function') openFmDashboard({ history: 'replace' });
+}
+function openDocumentDetail(docId, opts){
+  opts = opts || {};
+  if(!docId) return;
+  const sameDoc = activeDocId === docId && isDocPageOpen();
   activeDocId = docId;
+  const mode = opts.history || (sameDoc ? 'replace' : 'push');
+  switchView('docDetailView', { skipHistory: true });
+  if(mode !== 'none' && typeof navPush === 'function') navPush({ doc: docId, direct: !!opts.direct || (mode === 'replace' && !!(history.state && history.state.direct)) }, '#doc=' + encodeURIComponent(docId), mode === 'replace');
+  document.getElementById('detailNewTab').href = '#doc=' + encodeURIComponent(docId);
+  if(!sameDoc || mode !== 'none'){
+    document.getElementById('detailTitle').textContent = 'Loading…';
+    document.getElementById('detailBody').innerHTML = `<div class="empty-state"><b>Loading&hellip;</b></div>`;
+  }
   const docRef = db.collection('documents').doc(docId);
-  document.getElementById('detailBody').innerHTML = `<div class="empty-state"><b>Loading&hellip;</b></div>`;
-  openModal('detailModalOverlay');
   Promise.all([ docRef.get(), docRef.collection('versions').orderBy('versionNo','desc').get() ])
     .catch(err => { document.getElementById('detailBody').innerHTML = `<div class="empty-state"><b>Could not open this document</b><div>${escapeHtml(err.message)}</div></div>`; return [null, null]; })
     .then(([docSnap, versionsSnap]) => {
-      if(!docSnap) return;
+      if(!docSnap || activeDocId !== docId) return;
       if(!docSnap.exists){
-        document.getElementById('detailBody').innerHTML = '<div class="empty-state"><b>Document not found</b></div>';
+        document.getElementById('detailTitle').textContent = 'Document not found';
+        document.getElementById('detailBody').innerHTML = '<div class="empty-state"><b>This document no longer exists.</b></div>';
         return;
       }
       const docData = docSnap.data();
@@ -346,12 +364,57 @@ function openDocumentDetail(docId){
         return;
       }
       const versions = versionsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if(!versions.length){ document.getElementById('detailBody').innerHTML = '<div class="empty-state"><b>No versions found.</b></div>'; return; }
       const latest = versions[0];
       document.getElementById('detailTitle').textContent = `${docData.drawingNumber} — ${docData.title}`;
-      docRef.collection('versions').doc(latest.id).collection('history').orderBy('timestamp','asc').get()
-        .then(histSnap => renderDetail(docData, versions, latest, histSnap.docs.map(d => d.data())));
+      // Audit trail covers every version, so read each version's history
+      Promise.all(versions.map(v => docRef.collection('versions').doc(v.id).collection('history').orderBy('timestamp','asc').get()
+        .then(s => [v.id, s.docs.map(d => d.data())]).catch(() => [v.id, []])))
+        .then(pairs => { if(activeDocId === docId) renderDetail(docData, versions, latest, Object.fromEntries(pairs)); });
     });
 }
+
+// Who an item went to after a history entry. New entries store allocatedTo;
+// for older ones it's worked out from the version's approval steps.
+function assigneesAfter(v, approvedCount){
+  const approved = (v.steps || []).filter(s => s.decision === 'approved').sort((a, b) => (a.decidedAt && a.decidedAt.toMillis ? a.decidedAt.toMillis() : 0) - (b.decidedAt && b.decidedAt.toMillis ? b.decidedAt.toMillis() : 0));
+  const done = new Set(approved.slice(0, approvedCount).map(s => s.key));
+  const stages = [...new Set((v.steps || []).map(s => s.stage))].sort((a, b) => a - b);
+  const cur = stages.find(st => (v.steps || []).some(s => s.stage === st && !done.has(s.key)));
+  if(cur === undefined) return '';
+  return (v.steps || []).filter(s => s.stage === cur && !done.has(s.key)).map(stepAssigneeLabel).join(', ');
+}
+function buildAuditTrail(versions, histMap){
+  const rows = [];
+  let prevStatus = null;
+  [...versions].sort((a, b) => a.versionNo - b.versionNo).forEach(v => {
+    let approvedCount = 0;
+    (histMap[v.id] || []).forEach(h => {
+      if(h.action === 'step_approved') approvedCount++;
+      const from = h.fromStatus !== undefined ? h.fromStatus : (h.action === 'uploaded' ? null : prevStatus);
+      let alloc = h.allocatedTo;
+      if(alloc === undefined){
+        if(h.toStatus === 'published') alloc = '';
+        else if(h.toStatus === 'rejected') alloc = v.uploadedByName || '';
+        else if(h.action === 'moved' || h.action === 'reassigned') alloc = '';
+        else alloc = assigneesAfter(v, approvedCount);
+      }
+      const ms = h.timestamp && h.timestamp.toMillis ? h.timestamp.toMillis() : 0;
+      const pending = h.toStatus === 'pending_review' || h.toStatus === 'pending_approval';
+      rows.push({ h, v, from, to: h.toStatus, alloc, ms, due: pending && ms ? ms + tatDaysFor(h.toStatus) * 86400000 : null });
+      if(h.toStatus) prevStatus = h.toStatus;
+    });
+  });
+  return rows.sort((a, b) => b.ms - a.ms); // newest first
+}
+function fmtDateTime(ms){
+  if(!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).replace(',', '') + ' ' +
+    d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(' ', '');
+}
+function fmtDueDate(ms){ return ms ? new Date(ms).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).replace(/ (\d+),/, ' $1,') : ''; }
+function statusName(s){ return s ? (STATUS_LABELS[s] || s) : '—'; }
 
 function renderDetail(docData, versions, latest, history){
   const canResubmit = latest.status === 'rejected' && (currentUser.uid === docData.createdBy || currentUser.role === 'admin');
@@ -411,37 +474,68 @@ function renderDetail(docData, versions, latest, history){
   }
   else if(latest.status === 'rejected') stamp = `<div class="stamp stamp-red">Rejected</div>`;
 
-  const historyHtml = history.map(h => `
-    <div class="hist-item"><div class="hdot"></div>
-      <div><div>${escapeHtml(h.actorName)} &mdash; ${humanizeAction(h.action)}</div>
-      <div class="htime">${fmtDate(h.timestamp)}</div>
-      ${h.remarks ? `<div class="remarks">${escapeHtml(h.remarks)}</div>` : ''}</div>
-    </div>`).join('') || '<div style="font-size:12.5px; color:var(--text-muted);">No history yet.</div>';
+  // ---- Documents table: every version's file + signed copies ----
+  const fileRows = [];
+  [...versions].sort((a, b) => a.versionNo - b.versionNo).forEach(v => {
+    const cur = v.id === latest.id;
+    fileRows.push({ name: v.fileName, url: v.fileURL, ver: 'v' + v.versionNo, rev: v.revision, type: 'Original upload', by: v.uploadedByName, at: v.uploadedAt, cur: cur && !v.signedFileURL, superseded: !!v.supersededBy });
+    if(v.signedFileURL){
+      const base = String(v.fileName || 'document').replace(/\.[^.]+$/, '');
+      fileRows.push({ name: `signed_${base}.pdf`, url: v.signedFileURL, ver: 'v' + v.versionNo, rev: v.revision, type: 'Signed copy (with signature sheet)', by: v.signedBy, at: v.signSheetAt || v.signedAt, cur, superseded: !!v.supersededBy, signed: true });
+    }
+  });
+  const filesTable = `<table class="doc-table"><thead><tr><th style="width:56px;">Sl No.</th><th>File Name</th><th>Version</th><th>Revision</th><th>Type</th><th>Uploaded / Signed By</th><th>Date</th></tr></thead><tbody>
+    ${fileRows.map((r, i) => `<tr class="${r.cur ? 'cur' : ''}">
+      <td style="text-align:center;">${i + 1}</td>
+      <td><a href="${escapeHtml(r.url || '#')}" target="_blank" rel="noopener">${r.signed ? '&#9997;&#65039; ' : ''}${escapeHtml(r.name || '—')}</a>${r.cur ? ' <span class="doc-cur-tag">Current</span>' : ''}${r.superseded && !r.cur ? ' <span class="fm-muted">(superseded)</span>' : ''}</td>
+      <td>${escapeHtml(r.ver)}</td><td>${escapeHtml(r.rev || '—')}</td><td>${escapeHtml(r.type)}</td>
+      <td>${escapeHtml(r.by || '—')}</td><td>${fmtDateTime(r.at && r.at.toMillis ? r.at.toMillis() : 0)}</td>
+    </tr>`).join('')}</tbody></table>`;
 
-  const versionsHtml = versions.map(v => `
-    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed var(--border); font-size:12.5px;">
-      <span>v${v.versionNo} <span class="drawing-code" style="margin-left:6px;">${escapeHtml(v.revision||'')}</span>${v.supersededBy ? ' <span style="color:var(--text-muted);">(superseded)</span>' : ''}</span>
-      <span>${v.signedFileURL ? `<a href="${escapeHtml(v.signedFileURL)}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none; margin-right:10px;">Signed copy &#8599;</a>` : ''}<a href="${escapeHtml(v.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${v.signedFileURL ? 'Original' : 'Open file'} &#8599;</a></span>
-    </div>`).join('');
+  // ---- Audit Trail table ----
+  const trail = buildAuditTrail(versions, history);
+  const nowMs = Date.now();
+  const trailTable = trail.length ? `<table class="doc-table"><thead><tr><th>Date</th><th>Version</th><th>Status From</th><th>Status To</th><th>Actor</th><th>Allocated To</th><th>Remarks</th><th>Closure Due Date</th></tr></thead><tbody>
+    ${trail.map((r, i) => {
+      const isCurrentPending = i === 0 && r.due && (latest.status === 'pending_review' || latest.status === 'pending_approval');
+      const overdue = isCurrentPending && r.due < nowMs;
+      const remark = r.h.remarks ? escapeHtml(r.h.remarks) : `<span class="fm-muted">${escapeHtml(humanizeAction(r.h.action).replace(/^./, c => c.toUpperCase()))}</span>`;
+      return `<tr>
+        <td style="white-space:nowrap;">${fmtDateTime(r.ms)}</td>
+        <td>v${r.v.versionNo}</td>
+        <td>${escapeHtml(statusName(r.from))}</td>
+        <td><b>${escapeHtml(statusName(r.to))}</b></td>
+        <td>${escapeHtml(r.h.actorName || '—')}</td>
+        <td>${escapeHtml(r.alloc || '—')}</td>
+        <td>${remark}</td>
+        <td style="white-space:nowrap;">${r.due ? `<span class="${overdue ? 'overdue-tag' : ''}">${fmtDueDate(r.due)}</span>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody></table>` : '<div class="fm-empty-note" style="padding:14px;">No history yet.</div>';
 
   document.getElementById('detailBody').innerHTML = `
-    <div class="detail-meta-grid">
-      <div><span>Folder</span>${escapeHtml(typeof folderPath === 'function' ? folderPath(docData.folderId) : '—')}</div>
-      <div><span>Project</span>${escapeHtml(docData.project)}</div>
-      <div><span>Department</span>${escapeHtml(docData.department)}</div>
-      <div><span>Category</span>${escapeHtml(docData.category)}</div>
-      <div><span>Current Revision</span>${escapeHtml(latest.revision)}</div>
-      <div><span>File</span><a href="${escapeHtml(latest.signedFileURL||latest.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${escapeHtml(latest.fileName||'Open')}${latest.signedFileURL ? ' (signed)' : ''} &#8599;</a></div>
-      <div><span>Uploaded By</span>${escapeHtml(latest.uploadedByName)}</div>
-      <div><span>Status</span><span class="badge st-${latest.status}"><span class="dot"></span>${STATUS_LABELS[latest.status]}</span></div>
+    <div class="card panel doc-page-card">
+      <div class="detail-meta-grid">
+        <div><span>Folder</span>${escapeHtml(typeof folderPath === 'function' ? folderPath(docData.folderId) : '—')}</div>
+        <div><span>Project</span>${escapeHtml(docData.project)}</div>
+        <div><span>Department</span>${escapeHtml(docData.department)}</div>
+        <div><span>Category</span>${escapeHtml(docData.category)}</div>
+        <div><span>Current Revision</span>${escapeHtml(latest.revision)}</div>
+        <div><span>Current File</span><a href="${escapeHtml(latest.signedFileURL||latest.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${escapeHtml(latest.fileName||'Open')}${latest.signedFileURL ? ' (signed)' : ''} &#8599;</a></div>
+        <div><span>Uploaded By</span>${escapeHtml(latest.uploadedByName)}</div>
+        <div><span>Status</span><span class="badge st-${latest.status}"><span class="dot"></span>${STATUS_LABELS[latest.status]}</span></div>
+      </div>
+      ${stamp}
     </div>
-    ${stamp}
-    <h4 style="font-size:12px; margin:18px 0 4px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em;">Approval Progress</h4>
-    <div class="stage-track">${stageNodes}</div>
-    <div class="card" style="margin-bottom:18px;"><div class="panel" style="padding:6px 18px;">${stepRows}</div></div>
-    ${canResubmit ? `<button class="btn btn-gold" onclick="openResubmitModal('${activeDocId}')" style="margin-bottom:18px;">Submit Revised Version</button>` : ''}
-    <details style="margin-bottom:14px;"><summary style="cursor:pointer; font-weight:600; font-size:13px; color:var(--navy);">Version history (${versions.length})</summary><div style="margin-top:8px;">${versionsHtml}</div></details>
-    <details open><summary style="cursor:pointer; font-weight:600; font-size:13px; color:var(--navy);">Audit history</summary><div style="margin-top:8px;">${historyHtml}</div></details>
+    <div class="card panel doc-page-card">
+      <h4 class="doc-section-title">Approval Progress</h4>
+      <div class="stage-track">${stageNodes}</div>
+      <div style="padding:2px 0;">${stepRows}</div>
+      ${canResubmit ? `<button class="btn btn-gold" onclick="openResubmitModal('${activeDocId}')" style="margin-top:12px;">Submit Revised Version</button>` : ''}
+    </div>
+    <h4 class="doc-section-title doc-section-head">Documents</h4>
+    <div class="card doc-page-card" style="overflow-x:auto;">${filesTable}</div>
+    <h4 class="doc-section-title doc-section-head">Audit Trail</h4>
+    <div class="card doc-page-card" style="overflow-x:auto;">${trailTable}</div>
   `;
 }
 
@@ -536,10 +630,12 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
     if(published){ updates.signedBy = signature; updates.signedByUid = currentUser.uid; updates.signedByEmail = currentUser.email || null; updates.signedAt = ts; }
     tx.update(versionRef, updates);
     tx.update(docRef, { status: newStatus, updatedAt: ts });
+    const allocatedTo = published ? '' : newStatus === 'rejected' ? (v.uploadedByName || '')
+      : steps.filter(s => s.stage === newStage && s.decision === 'pending').map(stepAssigneeLabel).join(', ');
     tx.set(versionRef.collection('history').doc(), {
       action: decision === 'approved' ? 'step_approved' : 'step_rejected',
       actor: currentUser.uid, actorName: currentUser.name, timestamp: ts,
-      remarks: remarks || null, toStatus: newStatus
+      remarks: remarks || null, fromStatus: v.status || null, toStatus: newStatus, allocatedTo
     });
     return { newStatus, newStage, published, steps, docTitle: v.docTitle, docDrawingNumber: v.docDrawingNumber, uploadedBy: v.uploadedBy, decision };
   })).then(result => {
@@ -560,7 +656,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
     } else {
       toast('Step approved. Waiting on the parallel reviewer.', 'ok');
     }
-    if(activeDocId === docId && document.getElementById('detailModalOverlay').classList.contains('active')) openDocumentDetail(docId);
+    refreshDocPage(docId);
   }).catch(err => toast(err.message, 'err'));
 }
 
@@ -640,7 +736,8 @@ function submitResubmission(){
           batch.update(docRef, { currentVersionNo: newVersionNo, currentVersionId: newVersionRef.id, status: versionData.status,
             currentFileName: resubFile.name, currentFileURL: url, currentRevision: revision, updatedAt: ts });
           batch.set(newVersionRef.collection('history').doc(), {
-            action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null, toStatus: versionData.status
+            action: 'resubmitted', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts, remarks: null,
+            fromStatus: 'rejected', toStatus: versionData.status, allocatedTo: resolved.steps.filter(s => s.stage === 0).map(stepAssigneeLabel).join(', ')
           });
           batch.commit().then(() => {
             notifyTask(resolved.steps.filter(s => s.stage === 0), `${docData.drawingNumber} — ${docData.title} resubmitted (v${newVersionNo}) and needs review.`, activeDocId);

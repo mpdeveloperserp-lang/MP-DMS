@@ -73,10 +73,18 @@ let fmMoveCandidates = [];
 let fmTransferFrom = null;
 let fmLastUploadFolderId = null;
 let fmShowAllDocs = false;        // Files > All Documents panel
+let fmPendingFolderId = null;     // folder link opened before folders finished loading
 let projectMastersLoaded = false;
 let projectSyncInFlight = new Set(); // project master IDs whose folder is being created/renamed
 
 /* ---------------- small helpers ---------------- */
+// Record a Files location in browser history (opts.history: 'push' default | 'replace' | 'none')
+function fmHistory(opts, state, hash){
+  const mode = (opts && opts.history) || 'push';
+  if(mode === 'none' || typeof navPush !== 'function') return;
+  navPush(state, hash, mode === 'replace');
+}
+function showFilesView(){ if(!fmViewActive('filesView')) switchView('filesView', { skipHistory: true }); }
 function fmIsAdmin(){ return !!currentUser && currentUser.role === 'admin'; }
 function userName(uid){ const u = usersData.find(x => x.id === uid); return u ? u.name : (uid ? 'Unknown user' : '—'); }
 function fmtFolderNo(n){ return n == null ? '—' : String(n).padStart(Number(dmsParams.folderNoDigits) || 7, '0'); }
@@ -424,14 +432,19 @@ function stopFilesListeners(){
   myPrefs = { quickLinks: [] }; prefsLoaded = false;
   projectSyncInFlight = new Set();
   fmActiveFolderId = null; fmExpanded = new Set(); fmTreeFilter = ''; fmFolderDocs = null;
-  fmKmOpen = new Set(['pendReview', 'pendApproval']); fmOverdueOnly = false; fmSearchState = null; fmLinksPanel = null; fmShowAllDocs = false;
+  fmKmOpen = new Set(['pendReview', 'pendApproval']); fmOverdueOnly = false; fmPendingFolderId = null; fmSearchState = null; fmLinksPanel = null; fmShowAllDocs = false;
   fmReportRows = null; fmActiveReport = null; fmMoveCandidates = []; fmTransferFrom = null;
   dmsParams = { ...DEFAULT_DMS_PARAMS }; emailConfig = { ...DEFAULT_EMAIL_CONFIG };
 }
 
 function onFoldersChanged(){
   syncProjectFolders();
-  if(fmActiveFolderId && !foldersById.has(fmActiveFolderId)) openFmDashboard();
+  if(fmActiveFolderId && !foldersById.has(fmActiveFolderId)) openFmDashboard({ history: 'replace' });
+  if(fmPendingFolderId){
+    const pid = fmPendingFolderId; fmPendingFolderId = null;
+    if(foldersById.has(pid)) openFmFolder(pid, { history: 'none', noSwitch: !fmViewActive('filesView') });
+    else if(fmViewActive('filesView')) openFmDashboard({ history: 'replace' });
+  }
   renderFmTree();
   renderFmLinksPanel();
   renderFmMain();
@@ -499,7 +512,10 @@ function onFmTreeFilter(v){ fmTreeFilter = v; renderFmTree(); }
 
 function openFmFolder(id, opts){
   opts = opts || {};
-  if(!foldersById.has(id)) return;
+  if(!foldersById.has(id)){
+    if(!foldersLoaded){ fmPendingFolderId = id; showFilesView(); fmHistory(opts, { folder: id }, '#folder=' + encodeURIComponent(id)); } // open once folders load
+    return;
+  }
   fmSearchState = null; fmLinksPanel = null; fmShowAllDocs = false;
   fmActiveFolderId = id;
   folderChain(id).slice(0, -1).forEach(a => fmExpanded.add(a.id));
@@ -514,21 +530,25 @@ function openFmFolder(id, opts){
   } else {
     fmFolderDocs = [];
   }
-  if(!opts.noSwitch && !fmViewActive('filesView')) switchView('filesView');
+  if(!opts.noSwitch) showFilesView();
+  fmHistory(opts, { folder: id }, '#folder=' + encodeURIComponent(id));
   renderFmTree(); renderFmLinksPanel(); renderFmMain();
 }
 // Files > All Documents — the full documents table (formerly its own page)
-function openFmAllDocs(){
-  fmSearchState = null; fmActiveFolderId = null; fmLinksPanel = null; fmShowAllDocs = true;
+function openFmAllDocs(opts){
+  fmSearchState = null; fmActiveFolderId = null; fmLinksPanel = null; fmShowAllDocs = true; fmPendingFolderId = null;
   if(fmFolderDocsUnsub){ fmFolderDocsUnsub(); fmFolderDocsUnsub = null; }
   fmFolderDocs = null;
-  if(!fmViewActive('filesView')) switchView('filesView');
+  showFilesView();
+  fmHistory(opts, { view: 'filesView', alldocs: true }, '#alldocs');
   renderFmTree(); renderFmLinksPanel(); renderFmMain();
 }
-function openFmDashboard(){
-  fmSearchState = null; fmActiveFolderId = null; fmLinksPanel = null; fmShowAllDocs = false;
+function openFmDashboard(opts){
+  fmSearchState = null; fmActiveFolderId = null; fmLinksPanel = null; fmShowAllDocs = false; fmPendingFolderId = null;
   if(fmFolderDocsUnsub){ fmFolderDocsUnsub(); fmFolderDocsUnsub = null; }
   fmFolderDocs = null;
+  showFilesView();
+  fmHistory(opts, { view: 'filesView' }, '#filesView');
   renderFmTree(); renderFmLinksPanel(); renderFmMain();
 }
 
@@ -769,11 +789,12 @@ function docMatchesCrit(d, c){
   if(c.to && ms > new Date(c.to + 'T23:59:59').getTime()) return false;
   return true;
 }
-function runFmSearch(crit, label){
+function runFmSearch(crit, label, opts){
   fmSearchState = { crit, label, results: null };
-  fmShowAllDocs = false;
+  fmShowAllDocs = false; fmActiveFolderId = null; fmPendingFolderId = null;
   fmLinksPanel = null; renderFmLinksPanel();
-  if(!fmViewActive('filesView')) switchView('filesView');
+  showFilesView();
+  fmHistory(opts, { view: 'filesView', search: true, crit, label }, '#search');
   renderFmMain();
   fetchAllDocuments().then(docs => {
     if(!fmSearchState || fmSearchState.crit !== crit) return;
@@ -907,7 +928,7 @@ function deleteFolder(id){
     if(!confirm(`Are you sure you want to delete this folder?\n\n"${folderPath(id)}"`)) return;
     return db.collection('folders').doc(id).delete().then(() => {
       toast('Folder deleted.', 'ok');
-      if(fmActiveFolderId === id) openFmDashboard();
+      if(fmActiveFolderId === id) openFmDashboard({ history: 'replace' });
     });
   }).catch(err => toast('Could not delete: ' + err.message, 'err'));
 }
@@ -1307,7 +1328,7 @@ function runMoveFiles(){
           batch.update(ref.collection('versions').doc(d.currentVersionId), { docFolderId: dest });
           batch.set(ref.collection('versions').doc(d.currentVersionId).collection('history').doc(), {
             action: 'moved', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts,
-            remarks: `Moved from ${srcPath} to ${destPath}`, toStatus: d.status
+            remarks: `Moved from ${srcPath} to ${destPath}`, fromStatus: d.status, toStatus: d.status, allocatedTo: ''
           });
         }
       });
@@ -1391,7 +1412,7 @@ function submitTransferRights(){
     batch.update(vRef, { steps });
     batch.set(vRef.collection('history').doc(), {
       action: 'reassigned', actor: currentUser.uid, actorName: currentUser.name, timestamp: ts,
-      remarks: `Pending task reassigned from ${userName(from)} to ${userName(to)} (Transfer Rights)`, toStatus: v.status
+      remarks: `Pending task reassigned from ${userName(from)} to ${userName(to)} (Transfer Rights)`, fromStatus: v.status, toStatus: v.status, allocatedTo: userName(to)
     });
   });
   batch.commit().then(() => {
@@ -1408,11 +1429,11 @@ function submitTransferRights(){
       It is cleaned up in the browser (white background removed, trimmed,
       resized) and saved as a PNG at signatures/<uid>/..., with the link
       on users/<uid>.signatureURL.
-   2. When a file is published, a SIGNATURE SHEET is added as the last
+   2. When a file is published, a SIGNATURE SHEET is added as the FIRST
       page: document details + every person who submitted / reviewed /
       approved it, with name, role, step, date and signature image.
-        - PDF            -> sheet appended after the last page
-        - JPG / PNG      -> new PDF: the image, then the sheet
+        - PDF            -> sheet inserted as the first page(s)
+        - JPG / PNG      -> new PDF: the sheet, then the image
         - anything else  -> no sheet (can't be edited in the browser)
       The signed copy is saved next to the original (signed_<name>.pdf)
       and becomes the file people open; the original is kept.
@@ -1663,7 +1684,7 @@ async function buildSignedPdf(PDFLib, v, docData, srcBytes, kind, rows){
   const sheetPages = [];
   let page, y;
   const newPage = first => {
-    page = pdf.addPage([W, H]); sheetPages.push(page);
+    page = pdf.insertPage(sheetPages.length, [W, H]); sheetPages.push(page); // sheet goes at the FRONT of the file
     page.drawRectangle({ x: 0, y: H - 64, width: W, height: 64, color: navy });
     page.drawRectangle({ x: 0, y: H - 68, width: W, height: 4, color: orange });
     page.drawText('MP DEVELOPERS', { x: M, y: H - 30, size: 11, font: bold, color: rgb(1, 1, 1) });
@@ -1739,7 +1760,7 @@ async function addSignatureSheet(docId, versionId, opts){
     if(!kind){
       await vRef.update({ signSheetStatus: 'not_supported', signSheetError: null });
       toast(`Published. A signature sheet can only be added to PDF, JPG or PNG files — "${v.fileName}" is a ${String(v.fileName).split('.').pop().toUpperCase()} file.`, 'ok');
-      if(typeof activeDocId !== 'undefined' && activeDocId === docId && document.getElementById('detailModalOverlay').classList.contains('active')) openDocumentDetail(docId);
+      refreshDocPage(docId);
       return;
     }
     // Called straight after publishing (opts.justPublished) we already know it's published.
@@ -1766,7 +1787,7 @@ async function addSignatureSheet(docId, versionId, opts){
     vRef.update({ signSheetStatus: 'failed', signSheetError: err.message }).catch(() => {});
     toast('Published, but the signature sheet could not be added: ' + err.message, 'err');
   }
-  if(typeof activeDocId !== 'undefined' && activeDocId === docId && document.getElementById('detailModalOverlay').classList.contains('active')) openDocumentDetail(docId);
+  refreshDocPage(docId);
 }
 function onDocumentPublished(docId, versionId){
   if(dmsParams.signatureSheet === false) return;
