@@ -400,11 +400,12 @@ function renderDetail(docData, versions, latest, history){
   if(latest.status === 'published'){
     const canSheet = typeof addSignatureSheet === 'function' && typeof fileKind === 'function' && fileKind(latest.fileName)
       && (currentUser.role === 'admin' || latest.signedByUid === currentUser.uid);
-    const st = latest.signSheetStatus;
+    const supported = typeof fileKind === 'function' && !!fileKind(latest.fileName);
+    const st = supported ? latest.signSheetStatus : 'not_supported';
     const sheetLine = latest.signedFileURL
       ? `<div class="sig-sheet-line ok">&#9997;&#65039; Signature sheet added &middot; <a href="${escapeHtml(latest.signedFileURL)}" target="_blank" rel="noopener">Open signed copy &#8599;</a> &middot; <a href="${escapeHtml(latest.fileURL||'#')}" target="_blank" rel="noopener">Original</a>${(latest.signSheetMissing||[]).length ? `<br><span class="fm-muted">No signature on file for: ${escapeHtml(latest.signSheetMissing.join(', '))}</span>` : ''}</div>`
       : st === 'failed' ? `<div class="sig-sheet-line err">Signature sheet not added: ${escapeHtml(latest.signSheetError || '')}</div>`
-      : st === 'not_supported' ? `<div class="sig-sheet-line"><span class="fm-muted">No signature sheet &mdash; only PDF and image files can have one.</span></div>` : '';
+      : st === 'not_supported' ? `<div class="sig-sheet-line"><span class="fm-muted">No signature sheet &mdash; it can only be added to PDF, JPG or PNG files (this is a ${escapeHtml(String(latest.fileName||'').split('.').pop().toUpperCase())} file).</span></div>` : '';
     stamp = `<div class="stamp stamp-teal">Published<small>Signed by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>${sheetLine}` +
       (canSheet ? `<button class="btn btn-outline-orange btn-sm" style="margin-top:8px;" onclick="addSignatureSheet('${activeDocId}','${latest.id}')">${latest.signedFileURL ? '&#8635; Rebuild signature sheet' : '&#9997;&#65039; Add signature sheet'}</button>` : '');
   }

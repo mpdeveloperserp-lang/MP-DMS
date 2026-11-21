@@ -1454,40 +1454,89 @@ function renderEditUserSignature(u){
   document.getElementById('editUserSigSaveBtn').classList.add('hidden');
 }
 // Turn a photo/scan of a signature into a clean transparent PNG.
+// Works on grey or shadowed photos: the paper's brightness is measured in
+// small areas across the photo, so each pixel is compared with the paper
+// around it rather than with pure white.
 function processSignatureImage(file, removeBg){
   return new Promise((resolve, reject) => {
     if(!/^image\/(png|jpe?g|webp)$/i.test(file.type)){ reject(new Error('Please choose a PNG or JPG image.')); return; }
-    if(file.size > 8 * 1024 * 1024){ reject(new Error('Image is too large (max 8 MB).')); return; }
+    if(file.size > 15 * 1024 * 1024){ reject(new Error('Image is too large (max 15 MB).')); return; }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const scale = Math.min(1, 900 / img.width, 360 / img.height);
+      const scale = Math.min(1, 1200 / img.width, 600 / img.height);
       const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
       const c = document.createElement('canvas'); c.width = w; c.height = h;
       const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);   // transparent PNGs: treat empty as paper
       ctx.drawImage(img, 0, 0, w, h);
       const data = ctx.getImageData(0, 0, w, h);
       const px = data.data;
-      let minX = w, minY = h, maxX = -1, maxY = -1;
-      for(let y = 0; y < h; y++){
-        for(let x = 0; x < w; x++){
-          const i = (y * w + x) * 4;
-          if(removeBg){
-            const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-            if(lum > 215) px[i + 3] = 0;                                      // paper -> transparent
-            else if(lum > 170) px[i + 3] = Math.round(px[i + 3] * (215 - lum) / 45); // soft edge
+      URL.revokeObjectURL(url);
+      const L = new Float32Array(w * h);
+      for(let i = 0, j = 0; j < L.length; i += 4, j++) L[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+
+      if(removeBg){
+        // 1. paper brightness per block = a bright percentile of the block
+        const B = Math.max(12, Math.round(Math.min(w, h) / 10));
+        const bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+        const blk = new Float32Array(bw * bh);
+        for(let by = 0; by < bh; by++) for(let bx = 0; bx < bw; bx++){
+          const vals = [];
+          for(let y = by * B; y < Math.min(h, (by + 1) * B); y += 2) for(let x = bx * B; x < Math.min(w, (bx + 1) * B); x += 2) vals.push(L[y * w + x]);
+          vals.sort((a, b) => a - b);
+          blk[by * bw + bx] = vals[Math.floor(vals.length * 0.9)] || 255;
+        }
+        // 2. take the brightest neighbouring block, so thick strokes don't count as paper
+        const bg = new Float32Array(bw * bh);
+        for(let by = 0; by < bh; by++) for(let bx = 0; bx < bw; bx++){
+          let m = 0;
+          for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){
+            const yy = by + dy, xx = bx + dx;
+            if(yy >= 0 && yy < bh && xx >= 0 && xx < bw) m = Math.max(m, blk[yy * bw + xx]);
           }
-          if(px[i + 3] > 20){ if(x < minX) minX = x; if(x > maxX) maxX = x; if(y < minY) minY = y; if(y > maxY) maxY = y; }
+          bg[by * bw + bx] = Math.max(m, 40);
+        }
+        // 3. compare every pixel with the (smoothly interpolated) paper around it
+        const dark = new Float32Array(w * h);
+        for(let y = 0; y < h; y++){
+          const fy = Math.min(bh - 1, Math.max(0, (y + 0.5) / B - 0.5)); const y0 = Math.floor(fy), y1 = Math.min(bh - 1, y0 + 1), ty = fy - y0;
+          for(let x = 0; x < w; x++){
+            const fx = Math.min(bw - 1, Math.max(0, (x + 0.5) / B - 0.5)); const x0 = Math.floor(fx), x1 = Math.min(bw - 1, x0 + 1), tx = fx - x0;
+            const paper = (bg[y0 * bw + x0] * (1 - tx) + bg[y0 * bw + x1] * tx) * (1 - ty) + (bg[y1 * bw + x0] * (1 - tx) + bg[y1 * bw + x1] * tx) * ty;
+            const j = y * w + x, i = j * 4;
+            dark[j] = 1 - Math.min(1, L[j] / paper);                  // 0 = paper, 1 = black
+          }
+        }
+        // 4. keep faint marks only next to clearly dark strokes (drops shadows and paper texture)
+        const strong = new Uint8Array(w * h);
+        for(let j = 0; j < strong.length; j++) strong[j] = dark[j] > 0.24 ? 1 : 0;
+        const R = 3, tmp = new Uint8Array(w * h), near = new Uint8Array(w * h);
+        for(let y = 0; y < h; y++){ let run = -1e9; for(let x = 0; x < w; x++){ if(strong[y * w + x]) run = x; tmp[y * w + x] = x - run <= R ? 1 : 0; }
+          run = 1e9; for(let x = w - 1; x >= 0; x--){ if(strong[y * w + x]) run = x; if(run - x <= R) tmp[y * w + x] = 1; } }
+        for(let x = 0; x < w; x++){ let run = -1e9; for(let y = 0; y < h; y++){ if(tmp[y * w + x]) run = y; near[y * w + x] = y - run <= R ? 1 : 0; }
+          run = 1e9; for(let y = h - 1; y >= 0; y--){ if(tmp[y * w + x]) run = y; if(run - y <= R) near[y * w + x] = 1; } }
+        for(let j = 0, i = 0; j < dark.length; j++, i += 4){
+          const a = near[j] ? Math.max(0, Math.min(1, (dark[j] - 0.09) / 0.2)) : 0;
+          px[i] = px[i] * 0.55; px[i + 1] = px[i + 1] * 0.55; px[i + 2] = px[i + 2] * 0.55; // deepen the ink, keep its colour
+          px[i + 3] = Math.round(255 * a);
         }
       }
+      // trim to the signature
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for(let y = 0; y < h; y++) for(let x = 0; x < w; x++){
+        const i = (y * w + x) * 4;
+        const ink = removeBg ? px[i + 3] > 60 : L[y * w + x] < 200;
+        if(ink){ if(x < minX) minX = x; if(x > maxX) maxX = x; if(y < minY) minY = y; if(y > maxY) maxY = y; }
+      }
       ctx.putImageData(data, 0, 0);
-      URL.revokeObjectURL(url);
-      if(maxX < 0){ reject(new Error('No signature found in the image — try a darker pen or untick "Remove white background".')); return; }
-      const pad = 6;
+      if(maxX < 0){ reject(new Error('No signature found in the image — try a darker pen, or untick "Remove white background".')); return; }
+      const pad = 8;
       const cx = Math.max(0, minX - pad), cy = Math.max(0, minY - pad);
       const cw = Math.min(w - cx, maxX - minX + 1 + pad * 2), ch = Math.min(h - cy, maxY - minY + 1 + pad * 2);
-      const out = document.createElement('canvas'); out.width = cw; out.height = ch;
-      out.getContext('2d').drawImage(c, cx, cy, cw, ch, 0, 0, cw, ch);
+      const outScale = Math.min(1, 900 / cw, 320 / ch);
+      const out = document.createElement('canvas'); out.width = Math.round(cw * outScale); out.height = Math.round(ch * outScale);
+      out.getContext('2d').drawImage(c, cx, cy, cw, ch, 0, 0, out.width, out.height);
       out.toBlob(b => b ? resolve(b) : reject(new Error('Could not process the image.')), 'image/png');
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
@@ -1681,16 +1730,20 @@ async function addSignatureSheet(docId, versionId, opts){
   const vRef = db.collection('documents').doc(docId).collection('versions').doc(versionId);
   const dRef = db.collection('documents').doc(docId);
   try{
-    const [vSnap, dSnap] = await Promise.all([vRef.get(), dRef.get()]);
+    // Read from the server (not the local cache) so a file published a moment ago shows as published.
+    const fresh = ref => ref.get({ source: 'server' }).catch(() => ref.get());
+    const [vSnap, dSnap] = await Promise.all([fresh(vRef), fresh(dRef)]);
     if(!vSnap.exists || !dSnap.exists) throw new Error('Document not found.');
     const v = vSnap.data(), docData = dSnap.data();
-    if(v.status !== 'published') throw new Error('Only published files get a signature sheet.');
     const kind = fileKind(v.fileName);
     if(!kind){
-      await vRef.update({ signSheetStatus: 'not_supported' });
-      if(!opts.silent) toast(`Published. "${v.fileName}" isn't a PDF or image, so no signature sheet was added.`, 'ok');
+      await vRef.update({ signSheetStatus: 'not_supported', signSheetError: null });
+      toast(`Published. A signature sheet can only be added to PDF, JPG or PNG files — "${v.fileName}" is a ${String(v.fileName).split('.').pop().toUpperCase()} file.`, 'ok');
+      if(typeof activeDocId !== 'undefined' && activeDocId === docId && document.getElementById('detailModalOverlay').classList.contains('active')) openDocumentDetail(docId);
       return;
     }
+    // Called straight after publishing (opts.justPublished) we already know it's published.
+    if(v.status !== 'published' && !opts.justPublished) throw new Error('Only published files get a signature sheet.');
     const rows = signatureRows(v);
     const missing = rows.filter(r => !r.signatureURL).map(r => r.name);
     if(!opts.silent) toast('Adding the signature sheet…', 'ok');
@@ -1717,5 +1770,5 @@ async function addSignatureSheet(docId, versionId, opts){
 }
 function onDocumentPublished(docId, versionId){
   if(dmsParams.signatureSheet === false) return;
-  addSignatureSheet(docId, versionId);
+  addSignatureSheet(docId, versionId, { justPublished: true });
 }
