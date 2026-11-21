@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="data:,">
 <title>MP DMS &mdash; Document Management</title>
+<link rel="icon" href="assets/mp-logo.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 
@@ -55,13 +56,45 @@
   .hidden{display:none !important;}
 
   /* ---------- Login ---------- */
-  #loginScreen{
-    min-height:100vh; display:flex; align-items:center; justify-content:center;
-    background:
-      radial-gradient(1200px 600px at 15% -10%, #24467e 0%, transparent 60%),
-      radial-gradient(900px 500px at 110% 10%, #7a3a10 0%, transparent 55%),
-      var(--navy-dark);
-    padding:24px;
+  #loginScreen{ min-height:100vh; display:flex; background:#fff; }
+  /* left: campaign creative on its own background colour, anchored to the bottom */
+  .login-hero{
+    flex:1; min-width:0; position:relative; overflow:hidden; background:#E6EAED;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .login-hero img{ height:100%; width:auto; max-width:100%; object-fit:contain; object-position:center bottom; display:block; }
+  /* right: sign-in panel */
+  .login-side{
+    width:470px; flex:none; display:flex; flex-direction:column; justify-content:center;
+    padding:40px 48px 28px; background:#fff; box-shadow:-18px 0 40px -24px rgba(27,58,107,.35); position:relative; z-index:1;
+  }
+  .login-side::before{ content:''; position:absolute; left:0; right:0; top:0; height:6px; background:linear-gradient(90deg, var(--navy) 0 60%, var(--gold-bright) 60% 100%); }
+  .login-logo{ width:150px; height:auto; display:block; margin:0 auto 18px; }
+  .login-title{ text-align:center; font-family:var(--display); font-size:21px; color:var(--navy); margin:0; }
+  .login-sub{ text-align:center; font-size:13px; color:var(--text-muted); margin:6px 0 26px; }
+  .login-side .field label{ font-weight:600; }
+  .login-side .field input{ padding:12px 13px; font-size:14px; border-radius:9px; }
+  .login-side .field input:focus{ border-color:var(--gold-bright); box-shadow:0 0 0 3px rgba(243,112,33,.15); outline:none; }
+  .pw-wrap{ position:relative; }
+  .pw-wrap input{ padding-right:64px !important; }
+  .pw-toggle{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--navy-soft); font-size:12px; font-weight:700; cursor:pointer; padding:6px; }
+  .login-btn{ width:100%; padding:13px; font-size:15px; font-weight:700; border-radius:9px; background:var(--gold-bright); color:#fff; border:none; cursor:pointer; margin-top:4px; transition:filter .15s; }
+  .login-btn:hover{ filter:brightness(1.06); }
+  .login-btn:disabled{ opacity:.7; cursor:default; }
+  .login-row{ display:flex; justify-content:flex-end; margin:-4px 0 16px; }
+  .login-link{ background:none; border:none; color:var(--navy-soft); font-size:12.5px; font-weight:600; cursor:pointer; padding:0; }
+  .login-link:hover{ color:var(--gold-bright); text-decoration:underline; }
+  .auth-info{ background:var(--teal-soft); color:var(--teal); font-size:12.5px; padding:9px 11px; border-radius:7px; margin-bottom:14px; display:none; }
+  .login-help{ margin-top:18px; font-size:11.5px; color:var(--text-muted); line-height:1.5; text-align:center; }
+  .login-foot{ margin-top:auto; padding-top:26px; text-align:center; font-size:11px; color:var(--text-muted); letter-spacing:.02em; }
+  .login-foot b{ color:var(--navy); letter-spacing:.14em; } .login-foot b span{ color:var(--gold-bright); }
+  @media (max-width: 900px){
+    #loginScreen{ flex-direction:column; }
+    .login-hero{ flex:none; height:52vh; min-height:320px; }
+    .login-hero img{ width:100%; height:100%; max-width:none; object-fit:cover; object-position:center top; }
+    .login-side{ width:100%; padding:30px 22px 22px; box-shadow:none; }
+    .login-side::before{ display:none; }
+    .login-logo{ width:120px; }
   }
   .auth-card{
     width:100%; max-width:420px; background:var(--card); border-radius:16px;
@@ -493,19 +526,26 @@
 
 <!-- ============================================================ LOGIN / REGISTER ============================================================ -->
 <div id="loginScreen">
-  <div class="auth-card">
-    <div class="auth-brand">
-      <div class="auth-mark">MP</div>
-      <div class="auth-brand-text"><b>MP Developers DMS</b><span>Document Management &middot; Trust Forever</span></div>
-    </div>
+  <div class="login-hero" aria-hidden="true">
+    <img src="assets/login-banner.webp" alt="">
+  </div>
+  <div class="login-side">
+    <img class="login-logo" src="assets/mp-logo.jpg" alt="MP Developers — Trust Forever">
+    <h1 class="login-title">Document Management System</h1>
+    <p class="login-sub">Sign in with your MP Developers account</p>
     <div class="auth-error" id="authError"></div>
-
+    <div class="auth-info" id="authInfo"></div>
     <form id="loginForm" onsubmit="return handleLogin(event)">
-      <div class="field"><label>Email</label><input type="email" id="loginEmail" required autocomplete="username"></div>
-      <div class="field"><label>Password</label><input type="password" id="loginPassword" required autocomplete="current-password"></div>
-      <button class="btn btn-primary" type="submit" id="loginBtn">Sign In</button>
+      <div class="field"><label for="loginEmail">Email</label><input type="email" id="loginEmail" required autocomplete="username" placeholder="name@mpdevelopers.com"></div>
+      <div class="field"><label for="loginPassword">Password</label>
+        <div class="pw-wrap"><input type="password" id="loginPassword" required autocomplete="current-password" placeholder="Your password">
+          <button type="button" class="pw-toggle" id="pwToggle" onclick="togglePasswordView()" aria-label="Show password">Show</button></div>
+      </div>
+      <div class="login-row"><button type="button" class="login-link" onclick="sendLoginPasswordReset()">Forgot password?</button></div>
+      <button class="login-btn" type="submit" id="loginBtn">Sign In</button>
     </form>
-    <div class="auth-hint">This build covers the upload &rarr; approval &rarr; publish lifecycle end-to-end. Accounts are created by an Admin under <b>Manage Users</b> once signed in &mdash; there's no public self-registration. If you don't have an account yet, ask your Admin to create one for you.</div>
+    <div class="login-help">Accounts are created by your Admin &mdash; there's no self-registration. Don't have one yet? Ask the ERP team.</div>
+    <div class="login-foot"><b>TRUST <span>FOREVER</span></b><br>&copy; <span id="loginYear">2026</span> MP Developers Pvt Ltd</div>
   </div>
 </div>
 
@@ -1288,6 +1328,7 @@ function hideAuthError(){ document.getElementById('authError').style.display='no
 function handleLogin(ev){
   ev.preventDefault();
   hideAuthError();
+  document.getElementById('authInfo').style.display = 'none';
   const email = document.getElementById('loginEmail').value.trim();
   const pw = document.getElementById('loginPassword').value;
   const btn = document.getElementById('loginBtn');
@@ -1297,6 +1338,27 @@ function handleLogin(ev){
     .finally(() => { btn.disabled=false; btn.textContent='Sign In'; });
   return false;
 }
+
+function togglePasswordView(){
+  const inp = document.getElementById('loginPassword'), btn = document.getElementById('pwToggle');
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+}
+function showAuthInfo(msg){ const el = document.getElementById('authInfo'); el.textContent = msg; el.style.display = 'block'; }
+function sendLoginPasswordReset(){
+  hideAuthError();
+  document.getElementById('authInfo').style.display = 'none';
+  const email = document.getElementById('loginEmail').value.trim();
+  if(!email){ showAuthError('Type your email address above first, then click "Forgot password?".'); document.getElementById('loginEmail').focus(); return; }
+  auth.sendPasswordResetEmail(email)
+    .then(() => showAuthInfo(`If ${email} has an account, a password-reset link has been sent to it. Check your inbox (and spam).`))
+    .catch(err => err.code === 'auth/user-not-found'
+      ? showAuthInfo(`If ${email} has an account, a password-reset link has been sent to it. Check your inbox (and spam).`)
+      : showAuthError(friendlyAuthError(err)));
+}
+(function(){ const y = document.getElementById('loginYear'); if(y) y.textContent = new Date().getFullYear(); })();
 
 function friendlyAuthError(err){
   const map = {
@@ -1712,7 +1774,23 @@ function handleUpload(ev){
   return false;
 }
 </script>
-<script src="app-workflow.js"></script>
-<script src="app-files.js"></script>
+<!-- APP_BUILD: bump this (and the same value at the top of both .js files) on every release.
+     The ?v= makes browsers fetch the matching files instead of an old cached copy. -->
+<script src="app-workflow.js?v=2026.11.21-3"></script>
+<script src="app-files.js?v=2026.11.21-3"></script>
+<script>
+(function checkBuild(){
+  var want = '2026.11.21-3';
+  var wf = window.__BUILD_WORKFLOW, fl = window.__BUILD_FILES;
+  if(wf === want && fl === want) return;
+  // An old cached app-workflow.js / app-files.js was loaded: offer a clean reload instead of running mismatched code.
+  var bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#B85A10;color:#fff;padding:12px 18px;font:600 14px Inter,system-ui,sans-serif;display:flex;gap:14px;align-items:center;justify-content:center;';
+  bar.innerHTML = 'A newer version of MP DMS is available &mdash; some files are still the old cached copy. <button style="background:#fff;color:#B85A10;border:0;border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer;">Reload now</button>';
+  bar.querySelector('button').onclick = function(){ location.href = location.pathname + '?r=' + Date.now() + location.hash; };
+  document.body.appendChild(bar);
+  console.warn('MP DMS build mismatch: page', want, 'app-workflow.js', wf, 'app-files.js', fl);
+})();
+</script>
 </body>
 </html>
