@@ -397,7 +397,17 @@ function renderDetail(docData, versions, latest, history){
   }).join('');
 
   let stamp = '';
-  if(latest.status === 'published') stamp = `<div class="stamp stamp-teal">Published<small>Signed by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>`;
+  if(latest.status === 'published'){
+    const canSheet = typeof addSignatureSheet === 'function' && typeof fileKind === 'function' && fileKind(latest.fileName)
+      && (currentUser.role === 'admin' || latest.signedByUid === currentUser.uid);
+    const st = latest.signSheetStatus;
+    const sheetLine = latest.signedFileURL
+      ? `<div class="sig-sheet-line ok">&#9997;&#65039; Signature sheet added &middot; <a href="${escapeHtml(latest.signedFileURL)}" target="_blank" rel="noopener">Open signed copy &#8599;</a> &middot; <a href="${escapeHtml(latest.fileURL||'#')}" target="_blank" rel="noopener">Original</a>${(latest.signSheetMissing||[]).length ? `<br><span class="fm-muted">No signature on file for: ${escapeHtml(latest.signSheetMissing.join(', '))}</span>` : ''}</div>`
+      : st === 'failed' ? `<div class="sig-sheet-line err">Signature sheet not added: ${escapeHtml(latest.signSheetError || '')}</div>`
+      : st === 'not_supported' ? `<div class="sig-sheet-line"><span class="fm-muted">No signature sheet &mdash; only PDF and image files can have one.</span></div>` : '';
+    stamp = `<div class="stamp stamp-teal">Published<small>Signed by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>${sheetLine}` +
+      (canSheet ? `<button class="btn btn-outline-orange btn-sm" style="margin-top:8px;" onclick="addSignatureSheet('${activeDocId}','${latest.id}')">${latest.signedFileURL ? '&#8635; Rebuild signature sheet' : '&#9997;&#65039; Add signature sheet'}</button>` : '');
+  }
   else if(latest.status === 'rejected') stamp = `<div class="stamp stamp-red">Rejected</div>`;
 
   const historyHtml = history.map(h => `
@@ -410,7 +420,7 @@ function renderDetail(docData, versions, latest, history){
   const versionsHtml = versions.map(v => `
     <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed var(--border); font-size:12.5px;">
       <span>v${v.versionNo} <span class="drawing-code" style="margin-left:6px;">${escapeHtml(v.revision||'')}</span>${v.supersededBy ? ' <span style="color:var(--text-muted);">(superseded)</span>' : ''}</span>
-      <a href="${v.fileURL}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">Open file &#8599;</a>
+      <span>${v.signedFileURL ? `<a href="${escapeHtml(v.signedFileURL)}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none; margin-right:10px;">Signed copy &#8599;</a>` : ''}<a href="${escapeHtml(v.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${v.signedFileURL ? 'Original' : 'Open file'} &#8599;</a></span>
     </div>`).join('');
 
   document.getElementById('detailBody').innerHTML = `
@@ -420,7 +430,7 @@ function renderDetail(docData, versions, latest, history){
       <div><span>Department</span>${escapeHtml(docData.department)}</div>
       <div><span>Category</span>${escapeHtml(docData.category)}</div>
       <div><span>Current Revision</span>${escapeHtml(latest.revision)}</div>
-      <div><span>File</span><a href="${escapeHtml(latest.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${escapeHtml(latest.fileName||'Open')} &#8599;</a></div>
+      <div><span>File</span><a href="${escapeHtml(latest.signedFileURL||latest.fileURL||'#')}" target="_blank" rel="noopener" style="color:var(--teal); font-weight:600; text-decoration:none;">${escapeHtml(latest.fileName||'Open')}${latest.signedFileURL ? ' (signed)' : ''} &#8599;</a></div>
       <div><span>Uploaded By</span>${escapeHtml(latest.uploadedByName)}</div>
       <div><span>Status</span><span class="badge st-${latest.status}"><span class="dot"></span>${STATUS_LABELS[latest.status]}</span></div>
     </div>
@@ -451,7 +461,10 @@ function openDecisionModal(docId, versionId, stepKey, decision, stepLabel, isFin
   const sigField = document.getElementById('signatureField');
   if(decision === 'approved' && isFinal){
     sigField.classList.remove('hidden');
-    document.getElementById('signatureInput').value = '';
+    document.getElementById('signatureConfirm').checked = false;
+    // Signature comes from the signed-in account — no need to type a name
+    document.getElementById('signatureText').innerHTML =
+      `I confirm I am approving and publishing this document as <b>${escapeHtml(currentUser.name || '')}</b>${currentUser.email ? ` (${escapeHtml(currentUser.email)})` : ''}. This is recorded as my digital signature with today's date and time.`;
   } else {
     sigField.classList.add('hidden');
   }
@@ -472,8 +485,8 @@ function confirmDecision(){
   if(decision === 'rejected' && !remarks){ toast('Please provide a reason for rejection.', 'err'); return; }
   let signature = null;
   if(decision === 'approved' && isFinal){
-    signature = document.getElementById('signatureInput').value.trim();
-    if(!signature){ toast('Please type your name to digitally sign.', 'err'); return; }
+    if(!document.getElementById('signatureConfirm').checked){ toast('Please tick the confirmation box to sign and publish.', 'err'); return; }
+    signature = currentUser.name || currentUser.email || 'Unknown';
   }
   closeModal('decisionModalOverlay');
   applyStepDecision(docId, versionId, stepKey, decision, remarks, signature);
@@ -519,7 +532,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
     }
 
     const updates = { steps, status: newStatus, currentStage: newStage };
-    if(published){ updates.signedBy = signature; updates.signedAt = ts; }
+    if(published){ updates.signedBy = signature; updates.signedByUid = currentUser.uid; updates.signedByEmail = currentUser.email || null; updates.signedAt = ts; }
     tx.update(versionRef, updates);
     tx.update(docRef, { status: newStatus, updatedAt: ts });
     tx.set(versionRef.collection('history').doc(), {
@@ -539,6 +552,7 @@ function applyStepDecision(docId, versionId, stepKey, decision, remarks, signatu
       notifyUser(result.uploadedBy, msgP, docId);
       if(typeof queueEmail === 'function') queueEmail('published', { uids: [result.uploadedBy] }, msgP, docId);
       toast('Approved, signed, and published.', 'ok');
+      if(typeof onDocumentPublished === 'function') onDocumentPublished(docId, versionId);
     } else if(result.newStatus === 'pending_approval'){
       notifyTask(result.steps.filter(s => s.stage === result.newStage), `${result.docDrawingNumber} — ${result.docTitle} is ready for your approval.`, docId);
       toast('Step approved — document advanced to the next stage.', 'ok');
@@ -1451,7 +1465,7 @@ function renderUsersView(){
   const body = document.getElementById('usersTableBody');
   if(!body) return;
   if(usersData.length === 0){
-    body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No users yet</b></div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state"><b>No users yet</b></div></td></tr>`;
     return;
   }
   body.innerHTML = usersData.map(u => {
@@ -1464,6 +1478,7 @@ function renderUsersView(){
       <td>${escapeHtml(u.email || '—')}</td>
       <td>${roleDisplay}</td>
       <td>${escapeHtml(u.department || '—')}</td>
+      <td>${u.signatureURL ? `<img class="sig-thumb" src="${escapeHtml(u.signatureURL)}" alt="Signature" onclick="openEditUserModal('${u.id}')" title="Change signature">` : `<button class="fm-link" onclick="openEditUserModal('${u.id}')">+ Add</button>`}</td>
       <td><span class="badge ${enabled ? 'st-published' : 'st-rejected'}"><span class="dot"></span>${enabled ? 'Enabled' : 'Disabled'}</span></td>
       <td style="text-align:right;">
         ${isSelf ? `<span style="font-size:11.5px; color:var(--text-muted); margin-right:8px;">This is you</span>` : ''}
@@ -1486,6 +1501,7 @@ function openEditUserModal(uid){
   const isSelf = uid === currentUser.uid;
   document.getElementById('editUserStatus').disabled = isSelf;
   document.getElementById('editUserSelfNote').classList.toggle('hidden', !isSelf);
+  if(typeof renderEditUserSignature === 'function') renderEditUserSignature(u);
   openModal('editUserModalOverlay');
 }
 

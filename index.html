@@ -447,6 +447,15 @@
   .perm-head{display:flex; align-items:center; gap:10px; font-family:var(--display); font-weight:700; color:var(--navy); font-size:15px; margin-bottom:14px;}
   .dual-listbox-buttons .orange{background:var(--gold-bright); color:#fff; border-color:var(--gold-bright);}
   .form-section-title{font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700; margin:4px 0 10px;}
+  .sig-box{display:flex; gap:14px; align-items:center; flex-wrap:wrap;}
+  .sig-preview{width:220px; height:90px; border:1px dashed var(--border); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px;
+    background:repeating-conic-gradient(#f3f4f6 0% 25%, #fff 0% 50%) 50% / 16px 16px;}
+  .sig-preview img{max-width:204px; max-height:78px;}
+  .sig-controls{display:flex; flex-direction:column; gap:7px;}
+  .sig-thumb{height:30px; max-width:110px; cursor:pointer; vertical-align:middle;}
+  .sig-sheet-line{font-size:12.5px; margin-top:8px;}
+  .sig-sheet-line a{color:var(--gold-bright); font-weight:600;}
+  .sig-sheet-line.err{color:var(--red);}
   .check-row{display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:9px;}
   .check-row input{width:auto !important;}
 
@@ -638,6 +647,7 @@
             <div class="field"><label>Folder number digits</label><input type="number" id="spFolderDigits" min="1" max="12"><div class="auth-hint" style="margin-top:5px;">e.g. 7 shows folder 31 as 0000031.</div></div>
             <div class="field"><label>Review TAT (days)</label><input type="number" id="spReviewTat" min="0" max="365"></div>
             <div class="field"><label>Approval TAT (days)</label><input type="number" id="spApprovalTat" min="0" max="365"></div>
+            <div class="field full"><label class="check-row" style="margin:0;"><input type="checkbox" id="spSigSheet"> Add a signature sheet (names, roles, dates &amp; signatures of everyone who approved) as the last page of published PDF/image files</label></div>
             <div class="full"><button class="btn btn-orange" type="submit">Save Parameters</button></div>
           </div>
         </form>
@@ -720,9 +730,9 @@
       <div class="view-sub">Create accounts and enable/disable access. There's no public self-registration &mdash; this is the only way new accounts get created.</div>
       <div class="card">
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Signature</th><th>Status</th><th></th></tr></thead>
           <tbody id="usersTableBody">
-            <tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
+            <tr><td colspan="7"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -813,8 +823,10 @@
     <div class="modal-body">
       <p id="decisionDesc" style="font-size:13px; color:var(--text-muted); margin-top:0;"></p>
       <div class="field hidden" id="signatureField">
-        <label>Type your full name to digitally sign &amp; publish</label>
-        <input type="text" id="signatureInput" placeholder="Full name">
+        <label class="check-row" style="align-items:flex-start; background:var(--gold-soft); border:1px solid #F7B98C; border-radius:8px; padding:11px 12px; margin:0; font-weight:500; line-height:1.45;">
+          <input type="checkbox" id="signatureConfirm" style="margin-top:3px;">
+          <span id="signatureText">I confirm I am approving and publishing this document. This is recorded as my digital signature.</span>
+        </label>
       </div>
       <div class="field">
         <label id="remarksLabel">Remarks</label>
@@ -948,6 +960,22 @@
           <option value="disabled">Disabled</option>
         </select>
         <div class="auth-hint hidden" id="editUserSelfNote" style="margin-top:6px;">You can't disable your own account.</div>
+      </div>
+      <div class="field">
+        <label>Signature <span style="font-weight:400; color:var(--text-muted);">(shown on the signature sheet of files this person approves)</span></label>
+        <div class="sig-box">
+          <div class="sig-preview" id="editUserSigPreview"></div>
+          <div class="sig-controls">
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer; margin:0;">Choose photo&hellip;<input type="file" id="editUserSigFile" accept="image/png,image/jpeg,image/webp" class="hidden" onchange="onSignatureFileChosen()"></label>
+            <label class="check-row" style="margin:0; font-size:12px;"><input type="checkbox" id="editUserSigCleanBg" checked onchange="onSignatureFileChosen()"> Remove white background</label>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="btn btn-orange btn-sm hidden" id="editUserSigSaveBtn" onclick="saveUserSignature()">Save signature</button>
+              <button type="button" class="btn btn-ghost btn-sm hidden" id="editUserSigRemoveBtn" onclick="removeUserSignature()" style="color:var(--red);">Remove</button>
+            </div>
+            <div class="auth-hint" style="margin:0;" id="editUserSigNote"></div>
+          </div>
+        </div>
+        <div class="auth-hint">Tip: sign in dark ink on plain white paper and take a straight, well-lit photo &mdash; the background is removed automatically.</div>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="sendUserPasswordReset()" style="margin-top:4px;">Send Password Reset Email</button>
     </div>

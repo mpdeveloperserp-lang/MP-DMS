@@ -41,7 +41,7 @@ const UNFILED = '__unfiled__';
 
 const DEFAULT_DMS_PARAMS = {
   allowedExtensions: 'pdf,dwg,dxf,jpg,jpeg,png,doc,docx,xls,xlsx,ppt,pptx,zip,rar',
-  maxFileSizeMB: 50, reviewTatDays: 2, approvalTatDays: 2, folderNoDigits: 7
+  maxFileSizeMB: 50, reviewTatDays: 2, approvalTatDays: 2, folderNoDigits: 7, signatureSheet: true
 };
 const DEFAULT_EMAIL_CONFIG = {
   enabled: false, fromName: 'MP DMS', fromAddress: '', replyTo: '', appUrl: '',
@@ -1067,6 +1067,7 @@ function fillSetParamForm(){
   set('spReviewTat', dmsParams.reviewTatDays);
   set('spApprovalTat', dmsParams.approvalTatDays);
   set('spFolderDigits', dmsParams.folderNoDigits);
+  const sg = document.getElementById('spSigSheet'); if(sg) sg.checked = dmsParams.signatureSheet !== false;
 }
 function saveDmsParams(ev){
   if(ev) ev.preventDefault();
@@ -1077,6 +1078,7 @@ function saveDmsParams(ev){
     approvalTatDays: num('spApprovalTat', 0, 365), folderNoDigits: num('spFolderDigits', 1, 12)
   };
   if(Object.values(data).some(v => v === null)){ toast('Please enter valid numbers.', 'err'); return false; }
+  const sg = document.getElementById('spSigSheet'); if(sg) data.signatureSheet = sg.checked;
   db.collection('dmsSettings').doc('params').set(data, { merge: true })
     .then(() => toast('Parameters saved.', 'ok'))
     .catch(err => toast('Could not save: ' + err.message, 'err'));
@@ -1398,4 +1400,322 @@ function submitTransferRights(){
     document.getElementById('trResult').classList.add('hidden');
     fmTransferFrom = null;
   }).catch(err => toast('Transfer failed: ' + err.message, 'err'));
+}
+
+/* ============================================================
+   SIGNATURES
+   1. Manage Users -> Edit User: upload each person's signature photo.
+      It is cleaned up in the browser (white background removed, trimmed,
+      resized) and saved as a PNG at signatures/<uid>/..., with the link
+      on users/<uid>.signatureURL.
+   2. When a file is published, a SIGNATURE SHEET is added as the last
+      page: document details + every person who submitted / reviewed /
+      approved it, with name, role, step, date and signature image.
+        - PDF            -> sheet appended after the last page
+        - JPG / PNG      -> new PDF: the image, then the sheet
+        - anything else  -> no sheet (can't be edited in the browser)
+      The signed copy is saved next to the original (signed_<name>.pdf)
+      and becomes the file people open; the original is kept.
+   Needs the Storage bucket's CORS setting so the browser may read files
+   (one-time setup, see README).
+============================================================ */
+const PDF_LIB_URL = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+let pdfLibPromise = null;
+function loadPdfLib(){
+  if(window.PDFLib) return Promise.resolve(window.PDFLib);
+  if(!pdfLibPromise){
+    pdfLibPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDF_LIB_URL;
+      s.onload = () => window.PDFLib ? resolve(window.PDFLib) : reject(new Error('PDF library did not load.'));
+      s.onerror = () => { pdfLibPromise = null; reject(new Error('Could not load the PDF library (check the internet connection).')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfLibPromise;
+}
+
+/* ---------- signature upload (Edit User) ---------- */
+let sigPendingBlob = null;
+function renderEditUserSignature(u){
+  sigPendingBlob = null;
+  const prev = document.getElementById('editUserSigPreview');
+  const note = document.getElementById('editUserSigNote');
+  document.getElementById('editUserSigFile').value = '';
+  if(u && u.signatureURL){
+    prev.innerHTML = `<img src="${escapeHtml(u.signatureURL)}" alt="Signature">`;
+    note.textContent = u.signatureUpdatedAt ? 'Uploaded ' + fmtDay(u.signatureUpdatedAt) : '';
+    document.getElementById('editUserSigRemoveBtn').classList.remove('hidden');
+  } else {
+    prev.innerHTML = '<span class="fm-muted">No signature uploaded</span>';
+    note.textContent = '';
+    document.getElementById('editUserSigRemoveBtn').classList.add('hidden');
+  }
+  document.getElementById('editUserSigSaveBtn').classList.add('hidden');
+}
+// Turn a photo/scan of a signature into a clean transparent PNG.
+function processSignatureImage(file, removeBg){
+  return new Promise((resolve, reject) => {
+    if(!/^image\/(png|jpe?g|webp)$/i.test(file.type)){ reject(new Error('Please choose a PNG or JPG image.')); return; }
+    if(file.size > 8 * 1024 * 1024){ reject(new Error('Image is too large (max 8 MB).')); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 900 / img.width, 360 / img.height);
+      const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h);
+      const px = data.data;
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for(let y = 0; y < h; y++){
+        for(let x = 0; x < w; x++){
+          const i = (y * w + x) * 4;
+          if(removeBg){
+            const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+            if(lum > 215) px[i + 3] = 0;                                      // paper -> transparent
+            else if(lum > 170) px[i + 3] = Math.round(px[i + 3] * (215 - lum) / 45); // soft edge
+          }
+          if(px[i + 3] > 20){ if(x < minX) minX = x; if(x > maxX) maxX = x; if(y < minY) minY = y; if(y > maxY) maxY = y; }
+        }
+      }
+      ctx.putImageData(data, 0, 0);
+      URL.revokeObjectURL(url);
+      if(maxX < 0){ reject(new Error('No signature found in the image — try a darker pen or untick "Remove white background".')); return; }
+      const pad = 6;
+      const cx = Math.max(0, minX - pad), cy = Math.max(0, minY - pad);
+      const cw = Math.min(w - cx, maxX - minX + 1 + pad * 2), ch = Math.min(h - cy, maxY - minY + 1 + pad * 2);
+      const out = document.createElement('canvas'); out.width = cw; out.height = ch;
+      out.getContext('2d').drawImage(c, cx, cy, cw, ch, 0, 0, cw, ch);
+      out.toBlob(b => b ? resolve(b) : reject(new Error('Could not process the image.')), 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
+    img.src = url;
+  });
+}
+function onSignatureFileChosen(){
+  const f = document.getElementById('editUserSigFile').files[0];
+  if(!f) return;
+  const removeBg = document.getElementById('editUserSigCleanBg').checked;
+  processSignatureImage(f, removeBg).then(blob => {
+    sigPendingBlob = blob;
+    const url = URL.createObjectURL(blob);
+    document.getElementById('editUserSigPreview').innerHTML = `<img src="${url}" alt="New signature">`;
+    document.getElementById('editUserSigNote').textContent = 'Preview — click "Save signature" to keep it.';
+    document.getElementById('editUserSigSaveBtn').classList.remove('hidden');
+  }).catch(err => { toast(err.message, 'err'); document.getElementById('editUserSigFile').value = ''; });
+}
+function saveUserSignature(){
+  const uid = editingUserId;
+  if(!uid || !sigPendingBlob) return;
+  const btn = document.getElementById('editUserSigSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const old = usersData.find(u => u.id === uid);
+  const path = `signatures/${uid}/signature_${Date.now()}.png`;
+  const ref = storage.ref(path);
+  ref.put(sigPendingBlob, { contentType: 'image/png' })
+    .then(() => ref.getDownloadURL())
+    .then(url => db.collection('users').doc(uid).update({
+      signatureURL: url, signaturePath: path, signatureUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }))
+    .then(() => {
+      if(old && old.signaturePath && old.signaturePath !== path) storage.ref(old.signaturePath).delete().catch(() => {});
+      sigPendingBlob = null;
+      toast('Signature saved. It will appear on the signature sheet of files this person approves.', 'ok');
+      btn.classList.add('hidden');
+      document.getElementById('editUserSigNote').textContent = 'Saved';
+      document.getElementById('editUserSigRemoveBtn').classList.remove('hidden');
+    })
+    .catch(err => toast('Could not save the signature: ' + err.message, 'err'))
+    .finally(() => { btn.disabled = false; btn.textContent = 'Save signature'; });
+}
+function removeUserSignature(){
+  const uid = editingUserId;
+  const u = usersData.find(x => x.id === uid);
+  if(!u || !u.signatureURL) return;
+  if(!confirm(`Remove ${u.name}'s signature?`)) return;
+  db.collection('users').doc(uid).update({ signatureURL: null, signaturePath: null, signatureUpdatedAt: null })
+    .then(() => {
+      if(u.signaturePath) storage.ref(u.signaturePath).delete().catch(() => {});
+      toast('Signature removed.', 'ok');
+      renderEditUserSignature({});
+    })
+    .catch(err => toast('Could not remove: ' + err.message, 'err'));
+}
+
+/* ---------- signature sheet on publish ---------- */
+function fileKind(name){
+  const ext = (String(name || '').split('.').pop() || '').toLowerCase();
+  if(ext === 'pdf') return 'pdf';
+  if(ext === 'jpg' || ext === 'jpeg') return 'jpg';
+  if(ext === 'png') return 'png';
+  return null;
+}
+function fetchBytes(url){
+  return fetch(url).then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+    .catch(err => {
+      throw new Error(/Failed to fetch|NetworkError|Load failed/i.test(err.message)
+        ? "The browser wasn't allowed to read the file from Firebase Storage. The Storage bucket's CORS setting needs to be done once (see README → Signatures)."
+        : err.message);
+    });
+}
+function fileBytes(path, url){
+  return (path ? storage.ref(path).getDownloadURL() : Promise.resolve(url)).then(fetchBytes);
+}
+// Who goes on the sheet: the uploader, then every approved step in order.
+function signatureRows(v){
+  const rows = [];
+  const uploader = usersData.find(u => u.id === v.uploadedBy);
+  rows.push({ uid: v.uploadedBy, name: v.uploadedByName || (uploader && uploader.name) || '—', action: 'Prepared / Submitted', step: 'Upload', at: tsMs(v.uploadedAt) });
+  (v.steps || []).filter(s => s.decision === 'approved').sort((a, b) => a.stage - b.stage || tsMs(a.decidedAt) - tsMs(b.decidedAt)).forEach(s => {
+    const isFinal = s.stage === Math.max(...v.steps.map(x => x.stage));
+    const label = String(s.label || '').replace(/\s+—\s+.*$/, '');
+    rows.push({ uid: s.decidedBy, name: s.decidedByName || userName(s.decidedBy), action: isFinal ? 'Approved & Published' : (String(s.key).startsWith('rv_') ? 'Reviewed' : 'Approved'), step: label, at: tsMs(s.decidedAt) });
+  });
+  return rows.map(r => {
+    const u = usersData.find(x => x.id === r.uid);
+    return { ...r, role: u ? (ROLE_LABELS[u.role] || u.role || '') : '', signatureURL: u ? u.signatureURL : null, signaturePath: u ? u.signaturePath : null };
+  });
+}
+function fmtStamp(ms){
+  if(!ms) return '—';
+  return new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+async function buildSignedPdf(PDFLib, v, docData, srcBytes, kind, rows){
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  let pdf;
+  if(kind === 'pdf'){
+    pdf = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+  } else {
+    pdf = await PDFDocument.create();
+    const img = kind === 'png' ? await pdf.embedPng(srcBytes) : await pdf.embedJpg(srcBytes);
+    const maxW = 842, maxH = 1191; // fit within A3 portrait/landscape
+    const landscape = img.width > img.height;
+    const pw = landscape ? maxH : maxW, ph = landscape ? maxW : maxH;
+    const sc = Math.min((pw - 40) / img.width, (ph - 40) / img.height, 1);
+    const page = pdf.addPage([pw, ph]);
+    page.drawImage(img, { x: (pw - img.width * sc) / 2, y: (ph - img.height * sc) / 2, width: img.width * sc, height: img.height * sc });
+  }
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const charset = new Set(font.getCharacterSet());
+  const safe = s => Array.from(String(s == null ? '' : s)).map(ch => charset.has(ch.codePointAt(0)) ? ch : '?').join('');
+  const fit = (s, f, size, maxW) => { s = safe(s); if(f.widthOfTextAtSize(s, size) <= maxW) return s; while(s.length > 1 && f.widthOfTextAtSize(s + '…', size) > maxW) s = s.slice(0, -1); return s + '…'; };
+  const navy = rgb(0.106, 0.227, 0.420), orange = rgb(0.953, 0.439, 0.129), grey = rgb(0.42, 0.45, 0.5), line = rgb(0.82, 0.85, 0.89), text = rgb(0.12, 0.14, 0.18);
+
+  // signature images
+  const sigImgs = await Promise.all(rows.map(r => !r.signatureURL ? null :
+    fileBytes(r.signaturePath, r.signatureURL).then(b => pdf.embedPng(b)).catch(() => null)));
+
+  const W = 595.28, H = 841.89, M = 40;                       // A4 portrait
+  const cols = [ { t: '#', w: 22 }, { t: 'Name & Role', w: 140 }, { t: 'Action / Step', w: 108 }, { t: 'Date & Time', w: 108 }, { t: 'Signature', w: W - 2 * M - 378 } ];
+  const rowH = 62;
+  const sheetPages = [];
+  let page, y;
+  const newPage = first => {
+    page = pdf.addPage([W, H]); sheetPages.push(page);
+    page.drawRectangle({ x: 0, y: H - 64, width: W, height: 64, color: navy });
+    page.drawRectangle({ x: 0, y: H - 68, width: W, height: 4, color: orange });
+    page.drawText('MP DEVELOPERS', { x: M, y: H - 30, size: 11, font: bold, color: rgb(1, 1, 1) });
+    page.drawText(first ? 'Document Approval & Signature Sheet' : 'Document Approval & Signature Sheet (continued)', { x: M, y: H - 49, size: 15, font: bold, color: rgb(1, 1, 1) });
+    y = H - 92;
+    if(first){
+      const det = [
+        ['Drawing No.', v.docDrawingNumber], ['Title', v.docTitle], ['Project', docData.project], ['Folder', docData.folderId ? folderPath(docData.folderId) : '—'],
+        ['Document Category', docData.category], ['Version / Revision', `v${v.versionNo || 1}${v.revision ? ' / ' + v.revision : ''}`],
+        ['File', v.fileName], ['Published', fmtStamp(tsMs(v.signedAt) || Date.now())]
+      ];
+      const colW = (W - 2 * M) / 2;
+      det.forEach(([k, val], i) => {
+        const cx = M + (i % 2) * colW, cy = y - Math.floor(i / 2) * 30;
+        page.drawText(safe(k).toUpperCase(), { x: cx, y: cy, size: 7, font: bold, color: grey });
+        page.drawText(fit(val || '—', font, 10, colW - 12), { x: cx, y: cy - 12, size: 10, font, color: text });
+      });
+      y -= Math.ceil(det.length / 2) * 30 + 14;
+    }
+    // table header
+    page.drawRectangle({ x: M, y: y - 20, width: W - 2 * M, height: 20, color: rgb(0.918, 0.945, 0.984) });
+    let cx = M;
+    cols.forEach(c => { page.drawText(c.t, { x: cx + 6, y: y - 14, size: 8, font: bold, color: navy }); cx += c.w; });
+    y -= 20;
+  };
+  newPage(true);
+  rows.forEach((r, i) => {
+    if(y - rowH < M + 40) newPage(false);
+    const top = y;
+    page.drawLine({ start: { x: M, y: top - rowH }, end: { x: W - M, y: top - rowH }, thickness: 0.6, color: line });
+    let cx = M;
+    page.drawText(String(i + 1), { x: cx + 6, y: top - 22, size: 9, font: bold, color: grey }); cx += cols[0].w;
+    page.drawText(fit(r.name, bold, 10, cols[1].w - 10), { x: cx + 6, y: top - 22, size: 10, font: bold, color: text });
+    if(r.role) page.drawText(fit(r.role, font, 8, cols[1].w - 10), { x: cx + 6, y: top - 35, size: 8, font, color: grey });
+    cx += cols[1].w;
+    page.drawText(fit(r.action, bold, 8.5, cols[2].w - 10), { x: cx + 6, y: top - 22, size: 8.5, font: bold, color: r.action.includes('Published') ? orange : navy });
+    if(r.step) page.drawText(fit(r.step, font, 8, cols[2].w - 10), { x: cx + 6, y: top - 35, size: 8, font, color: grey });
+    cx += cols[2].w;
+    page.drawText(fit(fmtStamp(r.at), font, 8, cols[3].w - 8), { x: cx + 6, y: top - 22, size: 8, font, color: text });
+    cx += cols[3].w;
+    const img = sigImgs[i];
+    const boxW = cols[4].w - 12, boxH = rowH - 14;
+    if(img){
+      const sc = Math.min(boxW / img.width, boxH / img.height);
+      page.drawImage(img, { x: cx + 6 + (boxW - img.width * sc) / 2, y: top - 7 - boxH + (boxH - img.height * sc) / 2, width: img.width * sc, height: img.height * sc });
+    } else {
+      page.drawText('Approved electronically', { x: cx + 6, y: top - 26, size: 8.5, font, color: grey });
+      page.drawText('(no signature on file)', { x: cx + 6, y: top - 38, size: 7.5, font, color: grey });
+    }
+    y = top - rowH;
+  });
+  // footers
+  sheetPages.forEach((p, i) => {
+    p.drawLine({ start: { x: M, y: M + 22 }, end: { x: W - M, y: M + 22 }, thickness: 0.6, color: line });
+    p.drawText(safe('Approved electronically in MP DMS. Signatures are reproduced from each person\'s registered signature.'), { x: M, y: M + 10, size: 7, font, color: grey });
+    p.drawText(`Signature sheet ${i + 1} of ${sheetPages.length}`, { x: W - M - 80, y: M - 2, size: 7, font, color: grey });
+    p.drawText(safe('Generated ' + fmtStamp(Date.now())), { x: M, y: M - 2, size: 7, font, color: grey });
+  });
+  return pdf.save();
+}
+// Builds the signed copy and makes it the file people open. Safe to run again.
+async function addSignatureSheet(docId, versionId, opts){
+  opts = opts || {};
+  const vRef = db.collection('documents').doc(docId).collection('versions').doc(versionId);
+  const dRef = db.collection('documents').doc(docId);
+  try{
+    const [vSnap, dSnap] = await Promise.all([vRef.get(), dRef.get()]);
+    if(!vSnap.exists || !dSnap.exists) throw new Error('Document not found.');
+    const v = vSnap.data(), docData = dSnap.data();
+    if(v.status !== 'published') throw new Error('Only published files get a signature sheet.');
+    const kind = fileKind(v.fileName);
+    if(!kind){
+      await vRef.update({ signSheetStatus: 'not_supported' });
+      if(!opts.silent) toast(`Published. "${v.fileName}" isn't a PDF or image, so no signature sheet was added.`, 'ok');
+      return;
+    }
+    const rows = signatureRows(v);
+    const missing = rows.filter(r => !r.signatureURL).map(r => r.name);
+    if(!opts.silent) toast('Adding the signature sheet…', 'ok');
+    const PDFLib = await loadPdfLib();
+    const src = await fileBytes(v.filePath, v.fileURL);
+    const bytes = await buildSignedPdf(PDFLib, v, docData, src, kind, rows);
+    const baseName = String(v.fileName || 'document').replace(/\.[^.]+$/, '');
+    const path = `documents/${docId}/${versionId}/signed_${baseName}.pdf`;
+    const ref = storage.ref(path);
+    await ref.put(new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+    const url = await ref.getDownloadURL();
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    await vRef.update({ signedFileURL: url, signedFilePath: path, signSheetStatus: 'done', signSheetError: null, signSheetAt: ts, signSheetMissing: missing });
+    if(docData.currentVersionId === versionId) await dRef.update({ currentFileURL: url, currentFileName: `signed_${baseName}.pdf`, updatedAt: ts });
+    toast(missing.length
+      ? `Signature sheet added. No signature on file for: ${missing.join(', ')} — they show as "Approved electronically". Upload their signatures in Manage Users, then use "Add signature sheet" again.`
+      : 'Signature sheet added to the published file.', 'ok');
+  } catch(err){
+    console.error('signature sheet:', err);
+    vRef.update({ signSheetStatus: 'failed', signSheetError: err.message }).catch(() => {});
+    toast('Published, but the signature sheet could not be added: ' + err.message, 'err');
+  }
+  if(typeof activeDocId !== 'undefined' && activeDocId === docId && document.getElementById('detailModalOverlay').classList.contains('active')) openDocumentDetail(docId);
+}
+function onDocumentPublished(docId, versionId){
+  if(dmsParams.signatureSheet === false) return;
+  addSignatureSheet(docId, versionId);
 }
