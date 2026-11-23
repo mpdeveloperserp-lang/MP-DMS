@@ -1,4 +1,4 @@
-window.__BUILD_FILES = '2026.11.23-1'; // must match APP_BUILD in index.html
+window.__BUILD_FILES = '2026.11.23-2'; // must match APP_BUILD in index.html
 /* ============================================================
    FILE MANAGER MODULE  (app-files.js)
    IN4Suite-style document file manager, layered on the existing
@@ -675,6 +675,7 @@ function renderFmFolder(el){
     ? `${(wf.reviewers || []).length} reviewer(s) &rarr; ${(wf.approvers || []).length} approver(s)${wf.id !== id ? ` <span class="fm-muted">(inherited from ${escapeHtml(folderPath(wf.id))})</span>` : ''}`
     : 'Document Category workflow';
   const actionLinks = `<div class="fm-actions-links">
+      ${!fmIsAdmin() && canCreateSubfolderIn(id) ? `<a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>` : ''}
       ${fmIsAdmin() ? `<a onclick="openFolderPermModal('${id}')">Permissions</a><span class="sep">|</span>
       <a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>
       <a onclick="goImportToFolder('${id}')">Import Old Files</a><span class="sep">|</span>
@@ -870,8 +871,15 @@ function allocateFolderNo(){
     return n;
   }));
 }
+// Admin anywhere; other users need "Create subfolders" in User Access and access to the folder.
+function canCreateSubfolderIn(parentId){
+  if(!parentId || !currentUser) return false;
+  if(fmIsAdmin()) return true;
+  return canAccessFolder(parentId) && typeof canAccessPage === 'function' && canAccessPage('createFolder');
+}
 function openCreateFolderModal(parentId){
   if(!parentId){ toast('Root folders are created from projects. Add the project in Masters → Project Master and its folder appears automatically.', 'err'); return; }
+  if(!canCreateSubfolderIn(parentId)){ toast("You don't have permission to create subfolders here. Ask an Admin (Configurations → User Access → Create subfolders).", 'err'); return; }
   fmFolderModal = { mode: 'create', parentId: parentId || null };
   document.getElementById('cfTitle').textContent = parentId ? 'New Subfolder' : 'Create Root Folder';
   document.getElementById('cfParent').textContent = parentId ? 'Inside: ' + folderPath(parentId) : 'Top level (root folder)';
@@ -905,6 +913,8 @@ function submitCreateFolder(){
   const issue = folderNameIssue(name, m.parentId, m.folderId);
   if(issue){ toast(issue, 'err'); return; }
   if(m.mode !== 'rename' && !m.parentId){ toast('Root folders are created from projects (Masters → Project Master).', 'err'); return; }
+  if(m.mode !== 'rename' && !canCreateSubfolderIn(m.parentId)){ toast("You don't have permission to create subfolders here.", 'err'); return; }
+  if(m.mode === 'rename' && !fmIsAdmin()){ toast('Only Admin can rename folders.', 'err'); return; }
   const btn = document.getElementById('cfConfirmBtn');
   btn.disabled = true;
   const now = firebase.firestore.FieldValue.serverTimestamp();
