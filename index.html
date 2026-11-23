@@ -694,8 +694,9 @@
 
     <!-- ---------------- ROOT FOLDER VIEW (admin) ---------------- -->
     <div class="view" id="rootFolderView">
-      <div class="view-head"><h2>Root Folder</h2><button class="btn btn-orange" onclick="openCreateFolderModal(null)">+ Create Root Folder</button></div>
-      <div class="view-sub">Top-level folders of the file tree. <b>Every project in Masters &rarr; Project Master gets its folder automatically</b> (sub-items such as towers become subfolders); create other root folders here. Open one to add subfolders, set its reviewers/approvers (Properties) and who can see it (Permissions). A folder can only be deleted once it has no subfolders or files.</div>
+      <div class="view-head"><h2>Root Folder</h2><button class="btn btn-orange" onclick="switchView('projectsMasterView')">+ Add Project (Project Master)</button></div>
+      <div class="view-sub">Top-level folders of the file tree. <b>Root folders are created only from projects:</b> every project in Masters &rarr; Project Master gets a root folder with its name automatically (sub-items such as towers become subfolders), and renaming the project renames the folder. To add a root folder, add a project. Open a folder to add subfolders (e.g. Design, ENGG, LEGAL), set its reviewers/approvers (Properties) and who can see it (Permissions).</div>
+      <div class="card panel hidden" id="rootNonProjectNote" style="margin-bottom:14px; border-left:4px solid var(--gold-bright, #E8892B);"></div>
       <div class="card">
         <table>
           <thead><tr><th>Folder No.</th><th>Name</th><th>Subfolders</th><th>Access</th><th>Created By</th><th></th></tr></thead>
@@ -1142,6 +1143,22 @@
     <div class="modal-foot">
       <button class="btn btn-ghost" onclick="closeModal('createFolderModalOverlay')">Cancel</button>
       <button class="btn btn-orange" id="cfConfirmBtn" onclick="submitCreateFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------- MOVE ROOT FOLDER INTO PROJECT MODAL ---------------- -->
+<div class="modal-overlay" id="moveRootModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Move into a Project</h3><button class="modal-close" onclick="closeModal('moveRootModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="auth-hint" style="margin:0 0 12px;" id="mrInfo"></div>
+      <div class="field"><label>Project folder</label><select id="mrTarget"></select></div>
+      <div class="fm-muted" style="font-size:12.5px;">The folder keeps its name, subfolders, files, permissions and reviewers/approvers. It just sits inside the project folder from now on. Links to its documents keep working.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('moveRootModalOverlay')">Cancel</button>
+      <button class="btn btn-orange" id="mrConfirmBtn" onclick="submitMoveRoot()">Move</button>
     </div>
   </div>
 </div>
@@ -1847,11 +1864,11 @@ function handleUpload(ev){
 </script>
 <!-- APP_BUILD: bump this (and the same value at the top of both .js files) on every release.
      The ?v= makes browsers fetch the matching files instead of an old cached copy. -->
-<script src="app-workflow.js?v=2026.11.21-5"></script>
-<script src="app-files.js?v=2026.11.21-5"></script>
+<script src="app-workflow.js?v=2026.11.23-1"></script>
+<script src="app-files.js?v=2026.11.23-1"></script>
 <script>
 (function checkBuild(){
-  var want = '2026.11.21-5';
+  var want = '2026.11.23-1';
   var wf = window.__BUILD_WORKFLOW, fl = window.__BUILD_FILES;
   if(wf === want && fl === want) return;
   // An old cached app-workflow.js / app-files.js was loaded: offer a clean reload instead of running mismatched code.
