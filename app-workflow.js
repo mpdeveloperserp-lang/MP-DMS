@@ -1,4 +1,4 @@
-window.__BUILD_WORKFLOW = '2026.11.21-5'; // must match APP_BUILD in index.html
+window.__BUILD_WORKFLOW = '2026.11.23-1'; // must match APP_BUILD in index.html
 /* ============================================================
    HELPERS
 ============================================================ */
