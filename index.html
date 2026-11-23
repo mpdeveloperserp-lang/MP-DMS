@@ -1369,11 +1369,15 @@ let ROLE_LABELS = { ...DEFAULT_ROLE_LABELS };
 // Pages an Admin can restrict per-role under Page Access. Admin-only
 // sections (Manage Users, Master Data, Configuration) aren't part of this —
 // those are already gated by the existing admin-role check.
+// group 'page' = sidebar pages; group 'action' = things a user may do inside folders they can open.
+// userOnly items are granted per user only (off unless ticked in User Access), because the
+// Firestore rules check them against userPageAccess.
 const PAGE_ACCESS_ITEMS = [
-  { key: 'filesView', label: 'Files' },
-  { key: 'uploadView', label: 'Upload (button in folders)' },
-  { key: 'fmReportsView', label: 'Reports' },
-  { key: 'alertsView', label: 'Alerts' }
+  { key: 'filesView', label: 'Files', group: 'page' },
+  { key: 'fmReportsView', label: 'Reports', group: 'page' },
+  { key: 'alertsView', label: 'Alerts', group: 'page' },
+  { key: 'uploadView', label: 'Upload documents', hint: 'the + Upload button in folders they can open', group: 'action' },
+  { key: 'createFolder', label: 'Create subfolders', hint: 'New Subfolder inside folders they can open (never at the top level)', group: 'action', userOnly: true }
 ];
 let STATUS_LABELS = { ...DEFAULT_STATUS_LABELS };
 
@@ -1864,11 +1868,11 @@ function handleUpload(ev){
 </script>
 <!-- APP_BUILD: bump this (and the same value at the top of both .js files) on every release.
      The ?v= makes browsers fetch the matching files instead of an old cached copy. -->
-<script src="app-workflow.js?v=2026.11.23-1"></script>
-<script src="app-files.js?v=2026.11.23-1"></script>
+<script src="app-workflow.js?v=2026.11.23-2"></script>
+<script src="app-files.js?v=2026.11.23-2"></script>
 <script>
 (function checkBuild(){
-  var want = '2026.11.23-1';
+  var want = '2026.11.23-2';
   var wf = window.__BUILD_WORKFLOW, fl = window.__BUILD_FILES;
   if(wf === want && fl === want) return;
   // An old cached app-workflow.js / app-files.js was loaded: offer a clean reload instead of running mismatched code.
