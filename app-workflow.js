@@ -1,4 +1,4 @@
-window.__BUILD_WORKFLOW = '2026.11.21-3'; // must match APP_BUILD in index.html
+window.__BUILD_WORKFLOW = '2026.11.21-5'; // must match APP_BUILD in index.html
 /* ============================================================
    HELPERS
 ============================================================ */
@@ -63,7 +63,7 @@ function stepAssigneeLabel(s){
   return ROLE_LABELS[s.role] || s.role;
 }
 function humanizeAction(a){
-  return { uploaded:'uploaded the document', step_approved:'approved a step', step_rejected:'rejected the document', resubmitted:'submitted a revised version', moved:'moved the file', reassigned:'reassigned a pending task' }[a] || a;
+  return { uploaded:'uploaded the document', step_approved:'approved a step', step_rejected:'rejected the document', resubmitted:'submitted a revised version', moved:'moved the file', reassigned:'reassigned a pending task', imported:'imported the document as Published' }[a] || a;
 }
 // A user's EFFECTIVE roles: their primary `role` plus whatever's in their
 // `roles` array (additional roles), deduped. Deliberately does NOT special-
@@ -470,7 +470,9 @@ function renderDetail(docData, versions, latest, history){
       ? `<div class="sig-sheet-line ok">&#9997;&#65039; Signature sheet added &middot; <a href="${escapeHtml(latest.signedFileURL)}" target="_blank" rel="noopener">Open signed copy &#8599;</a> &middot; <a href="${escapeHtml(latest.fileURL||'#')}" target="_blank" rel="noopener">Original</a>${(latest.signSheetMissing||[]).length ? `<br><span class="fm-muted">No signature on file for: ${escapeHtml(latest.signSheetMissing.join(', '))}</span>` : ''}</div>`
       : st === 'failed' ? `<div class="sig-sheet-line err">Signature sheet not added: ${escapeHtml(latest.signSheetError || '')}</div>`
       : st === 'not_supported' ? `<div class="sig-sheet-line"><span class="fm-muted">No signature sheet &mdash; it can only be added to PDF, JPG or PNG files (this is a ${escapeHtml(String(latest.fileName||'').split('.').pop().toUpperCase())} file).</span></div>` : '';
-    stamp = `<div class="stamp stamp-teal">Published<small>Signed by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>${sheetLine}` +
+    stamp = latest.imported
+      ? `<div class="stamp stamp-teal">Published<small>Imported (old document) by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>`
+      : `<div class="stamp stamp-teal">Published<small>Signed by ${escapeHtml(latest.signedBy||'')} &middot; ${timeAgo(latest.signedAt)}</small></div>${sheetLine}` +
       (canSheet ? `<button class="btn btn-outline-orange btn-sm" style="margin-top:8px;" onclick="addSignatureSheet('${activeDocId}','${latest.id}')">${latest.signedFileURL ? '&#8635; Rebuild signature sheet' : '&#9997;&#65039; Add signature sheet'}</button>` : '');
   }
   else if(latest.status === 'rejected') stamp = `<div class="stamp stamp-red">Rejected</div>`;
@@ -763,18 +765,18 @@ function submitResubmission(){
    dropdowns; sub-items are an organizational reference for now.
 ============================================================ */
 const MASTER_TYPES = [
-  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject'],
+  { key: 'projectMasters',    label: 'Projects',    singular: 'project',    selects: ['fProject','filterProject','imProject'],
     hasSubItems: true, panelId: 'projectsMasterPanel',
     starter: ['MP Winter','MP Merlin','MP Golden Heights','MP Pace Petals','MP Eden'],
     // Each project (and sub-item) automatically gets a folder in Files — see syncProjectFolders() in app-files.js
     inUseMessage: 'This project is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.project === item.name) },
-  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect','editUserDept'],
+  { key: 'departmentMasters', label: 'Departments', singular: 'department', selects: ['fDepartment','newUserDept','filterDepartment','createRoleDeptSelect','editUserDept','imDepartment'],
     hasSubItems: true, panelId: 'departmentsMasterPanel',
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
     inUseMessage: 'This department is in use and cannot be deleted.',
     isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
-  { key: 'categoryMasters',   label: 'Document Categories',  singular: 'document category',   selects: ['fCategory','filterCategory'],
+  { key: 'categoryMasters',   label: 'Document Categories',  singular: 'document category',   selects: ['fCategory','filterCategory','imCategory'],
     hasSubItems: true, panelId: 'categoriesMasterPanel',
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
     inUseMessage: 'This document category is already in use and cannot be deleted.',

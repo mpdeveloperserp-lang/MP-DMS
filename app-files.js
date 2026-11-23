@@ -1,4 +1,4 @@
-window.__BUILD_FILES = '2026.11.21-3'; // must match APP_BUILD in index.html
+window.__BUILD_FILES = '2026.11.21-5'; // must match APP_BUILD in index.html
 /* ============================================================
    FILE MANAGER MODULE  (app-files.js)
    IN4Suite-style document file manager, layered on the existing
@@ -474,6 +474,7 @@ function onFmViewShown(viewId){
   if(viewId === 'alertsView') renderAlerts();
   if(viewId === 'rootFolderView') renderRootFolderView();
   if(viewId === 'moveFilesView') populateFolderSelects();
+  if(viewId === 'importDocsView'){ populateImportDest(); imRenderPreview(); }
   if(viewId === 'transferRightsView') populateTransferUserSelects();
 }
 
@@ -676,6 +677,7 @@ function renderFmFolder(el){
   const actionLinks = `<div class="fm-actions-links">
       ${fmIsAdmin() ? `<a onclick="openFolderPermModal('${id}')">Permissions</a><span class="sep">|</span>
       <a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>
+      <a onclick="goImportToFolder('${id}')">Import Old Files</a><span class="sep">|</span>
       <a class="danger" onclick="deleteFolder('${id}')">Delete Folder</a><span class="sep">|</span>` : ''}
       <a onclick="toggleQuickLink('${id}')">${isQuick ? '&#9733; Remove Quick Link' : '&#9734; Add to Quick Links'}</a>
     </div>`;
@@ -1794,3 +1796,255 @@ function onDocumentPublished(docId, versionId){
   if(dmsParams.signatureSheet === false) return;
   addSignatureSheet(docId, versionId, { justPublished: true });
 }
+
+/* ============================================================
+   IMPORT OLD DOCUMENTS (admin)
+   Bulk-loads old files straight in as Published — no review/approval,
+   no notifications. A folder chosen from the computer is recreated as
+   DMS subfolders (existing folders with the same name are reused, so the
+   import can be re-run safely). Each file gets:
+     documents/{id}            status 'published', imported: true
+     versions/{v}              one completed step "Imported (legacy document)"
+     versions/{v}/history/{h}  action 'imported'  (null → Published)
+============================================================ */
+let imItems = [];          // { file, dirs:[...], name, size, skip:null|reason, state, folderId, docId }
+let imRunning = false, imStopRequested = false;
+const IM_JUNK = /^(thumbs\.db|desktop\.ini|\.ds_store)$/i;
+
+function goImportToFolder(folderId){
+  switchView('importDocsView');
+  populateImportDest();
+  const sel = document.getElementById('imDest');
+  if(sel && folderId) { sel.value = folderId; imRenderPreview(); }
+}
+function populateImportDest(){
+  if(!currentUser) return;
+  fillFolderSelect('imDest', folderOptions(false), 'Select a DMS folder&hellip;');
+}
+function imFmtSize(b){
+  if(b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+  if(b >= 1024) return Math.round(b / 1024) + ' KB';
+  return b + ' B';
+}
+function imCleanName(n){ return String(n || '').replace(/[\/\\]/g, '-').trim().slice(0, 80) || 'Folder'; }
+function imFilesChosen(input){
+  if(imRunning){ toast('An import is running. Stop it or wait until it finishes.', 'err'); input.value = ''; return; }
+  const files = [...(input.files || [])];
+  input.value = '';
+  if(!files.length) return;
+  imItems = files.map(file => {
+    const parts = String(file.webkitRelativePath || file.name).split('/').filter(Boolean);
+    return { file, rel: parts, name: file.name, size: file.size, state: 'waiting', skip: null };
+  });
+  const top = imItems[0].rel.length > 1 ? imItems[0].rel[0] : '';
+  document.getElementById('imPicked').innerHTML = top
+    ? `Folder <b>${escapeHtml(top)}</b> &middot; ${files.length} file${files.length === 1 ? '' : 's'}`
+    : `${files.length} file${files.length === 1 ? '' : 's'} chosen`;
+  imRenderPreview();
+}
+function imDirsFor(it){
+  let dirs = it.rel.slice(0, -1).map(imCleanName);
+  if(!document.getElementById('imKeepTop').checked) dirs = dirs.slice(1);
+  return dirs;
+}
+function imSkipReason(it){
+  const n = it.name;
+  if(IM_JUNK.test(n) || n.startsWith('~$') || n.startsWith('.')) return 'System / temporary file';
+  if(it.size === 0) return 'Empty file (0 bytes)';
+  if(!document.getElementById('imIgnoreLimits').checked){
+    const issue = validateUploadFile(it.file);
+    if(issue) return issue.replace(/This file is/, 'File is');
+  }
+  return null;
+}
+function imDocNo(name){
+  const base = name.replace(/\.[^.]+$/, '');
+  const mode = document.getElementById('imDocNo').value;
+  if(mode === 'blank') return '';
+  if(mode === 'name') return base;
+  return base.split(/\s+/)[0] || base;
+}
+function imRenderPreview(){
+  const card = document.getElementById('imSummaryCard'), tcard = document.getElementById('imTableCard');
+  if(!imItems.length){ card.classList.add('hidden'); tcard.classList.add('hidden'); return; }
+  const destId = document.getElementById('imDest').value;
+  const destPath = destId ? folderPath(destId) : '(choose a DMS folder)';
+  if(!imRunning) imItems.forEach(it => { if(it.state === 'waiting' || it.state === 'skipped') { it.skip = imSkipReason(it); it.state = it.skip ? 'skipped' : 'waiting'; } });
+  const ok = imItems.filter(it => !it.skip), skipped = imItems.length - ok.length;
+  const newDirs = new Set(ok.map(it => imDirsFor(it).join('/')).filter(Boolean));
+  const total = ok.reduce((a, it) => a + it.size, 0);
+  const project = document.getElementById('imProject').value || (destId ? projectNameForFolder(destId) : '');
+  document.getElementById('imSummary').innerHTML =
+    `<b>${ok.length}</b> file${ok.length === 1 ? '' : 's'} (${imFmtSize(total)}) will be imported as <b>Published</b> into <b>${escapeHtml(destPath)}</b>` +
+    (newDirs.size ? `, in ${newDirs.size} subfolder${newDirs.size === 1 ? '' : 's'}` : '') + '.' +
+    (project ? ` Project: <b>${escapeHtml(project)}</b>.` : '') +
+    (skipped ? `<br><span style="color:var(--red);">${skipped} file${skipped === 1 ? '' : 's'} will be skipped</span> (reason shown in the list).` : '');
+  card.classList.remove('hidden'); tcard.classList.remove('hidden');
+  const SHOW = 1000;
+  const rows = imItems.slice(0, SHOW).map((it, i) => {
+    const loc = [destId ? folderPath(destId).replace(/\/$/, '') : '…', ...imDirsFor(it)].join('/') + '/';
+    return `<tr><td>${i + 1}</td><td><div style="font-weight:600;">${escapeHtml(it.name)}</div><div class="fm-muted" style="font-size:11.5px;">${escapeHtml(loc)}${!it.skip ? ' &middot; No. ' + escapeHtml(imDocNo(it.name) || '—') : ''}</div></td>
+      <td>${imFmtSize(it.size)}</td><td id="imSt${i}">${imStatusHtml(it)}</td></tr>`;
+  }).join('');
+  document.getElementById('imTableBody').innerHTML = rows +
+    (imItems.length > SHOW ? `<tr><td colspan="4" class="fm-muted">&hellip; and ${imItems.length - SHOW} more (not listed, but they will be imported).</td></tr>` : '');
+}
+function imStatusHtml(it){
+  if(it.state === 'skipped') return `<span class="im-st skip">Skipped: ${escapeHtml(it.skip || '')}</span>`;
+  if(it.state === 'done') return `<span class="im-st ok">&#10003; Published</span>${it.docId ? ` &middot; <a onclick="openDocumentDetail('${it.docId}')">open</a>` : ''}`;
+  if(it.state === 'exists') return `<span class="im-st skip">Already in DMS (skipped)</span>`;
+  if(it.state === 'error') return `<span class="im-st err">Failed: ${escapeHtml(it.error || '')}</span>`;
+  if(it.state === 'uploading') return `<span class="im-st run">Uploading&hellip; ${it.pct || 0}%</span>`;
+  return '<span class="im-st">Waiting</span>';
+}
+function imSetState(i, state, extra){
+  Object.assign(imItems[i], { state }, extra || {});
+  const el = document.getElementById('imSt' + i);
+  if(el) el.innerHTML = imStatusHtml(imItems[i]);
+}
+// Find or create the DMS folder for a path under the destination; one promise per path so parallel uploads share it.
+function imEnsureFolder(destId, dirs, cache){
+  if(!dirs.length) return Promise.resolve(destId);
+  const key = dirs.join('/');
+  if(cache.has(key)) return cache.get(key);
+  const p = imEnsureFolder(destId, dirs.slice(0, -1), cache).then(parentId => {
+    const name = dirs[dirs.length - 1];
+    const existing = childFolders(parentId).find(f => f.name.trim().toLowerCase() === name.toLowerCase())
+      || (cache.created || []).find(c => c.parentId === parentId && c.name.toLowerCase() === name.toLowerCase());
+    if(existing) return existing.id;
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    return allocateFolderNo().then(no => db.collection('folders').add({
+      name, parentId, folderNo: no, description: 'Created by Import Old Documents.',
+      permissions: { users: [], roles: [], departments: [], applyToSubfolders: true },
+      reviewers: [], approvers: [], subscribers: [],
+      createdBy: currentUser.uid, createdByName: currentUser.name, createdAt: now, updatedAt: now
+    })).then(ref => { (cache.created = cache.created || []).push({ id: ref.id, parentId, name }); fmExpanded.add(parentId); return ref.id; });
+  });
+  cache.set(key, p);
+  return p;
+}
+// File names already in a folder (lower-case), fetched once per folder.
+function imExistingNames(folderId, nameCache){
+  if(!nameCache.has(folderId)){
+    nameCache.set(folderId, db.collection('documents').where('folderId', '==', folderId).get()
+      .then(snap => new Set(snap.docs.map(d => String(d.data().currentFileName || '').toLowerCase())))
+      .catch(() => new Set()));
+  }
+  return nameCache.get(folderId);
+}
+function imUploadOne(i, folderId, opts){
+  const it = imItems[i], file = it.file;
+  const docRef = db.collection('documents').doc();
+  const versionRef = docRef.collection('versions').doc();
+  const storagePath = `documents/${docRef.id}/${versionRef.id}/${file.name}`;
+  const task = storage.ref(storagePath).put(file);
+  imItems[i].task = task;
+  task.on('state_changed', snap => {
+    const pct = Math.round(snap.bytesTransferred / (snap.totalBytes || 1) * 100);
+    if(pct !== it.pct) imSetState(i, 'uploading', { pct });
+  });
+  return task.then(() => {
+    const bucket = task.snapshot.ref.bucket;
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(storagePath)}?alt=media`;
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    const ts = firebase.firestore.Timestamp.now();
+    const title = file.name.replace(/\.[^.]+$/, '');
+    const docNo = imDocNo(file.name);
+    const project = opts.project || projectNameForFolder(folderId) || opts.destProject || '';
+    const remarks = 'Old document imported directly as Published (no review/approval).';
+    const steps = [{ key: 'import', label: 'Imported (legacy document)', stage: 0, role: null, uid: currentUser.uid,
+      decision: 'approved', decidedBy: currentUser.uid, decidedByName: currentUser.name, decidedAt: ts, remarks }];
+    const batch = db.batch();
+    batch.set(docRef, {
+      title, drawingNumber: docNo, project, department: opts.department, category: opts.category, folderId,
+      currentFileName: file.name, currentFileURL: url, currentRevision: opts.revision,
+      currentVersionNo: 1, currentVersionId: versionRef.id, status: 'published', imported: true,
+      createdBy: currentUser.uid, createdByName: currentUser.name, createdAt: now, updatedAt: now
+    });
+    batch.set(versionRef, {
+      versionNo: 1, revision: opts.revision, fileName: file.name, fileURL: url, filePath: storagePath,
+      uploadedBy: currentUser.uid, uploadedByName: currentUser.name, uploadedAt: now,
+      status: 'published', currentStage: 1, steps, workflowConfigName: 'Import Old Documents', imported: true,
+      originalModifiedAt: file.lastModified ? firebase.firestore.Timestamp.fromMillis(file.lastModified) : null,
+      originalPath: (it.rel || []).join('/'),
+      signedBy: currentUser.name, signedByUid: currentUser.uid, signedByEmail: currentUser.email || null, signedAt: ts,
+      supersededBy: null, docTitle: title, docDrawingNumber: docNo, docProject: project, docId: docRef.id, docFolderId: folderId
+    });
+    batch.set(versionRef.collection('history').doc(), {
+      action: 'imported', actor: currentUser.uid, actorName: currentUser.name, timestamp: now,
+      remarks, fromStatus: null, toStatus: 'published', allocatedTo: ''
+    });
+    return batch.commit().then(() => docRef.id);
+  });
+}
+async function startImport(){
+  if(imRunning) return;
+  if(!fmIsAdmin()){ toast('Only Admin can import old documents.', 'err'); return; }
+  const destId = document.getElementById('imDest').value;
+  if(!destId){ toast('Please choose the DMS folder to import into.', 'err'); return; }
+  imRenderPreview();
+  const todo = imItems.map((it, i) => i).filter(i => !imItems[i].skip && imItems[i].state !== 'done' && imItems[i].state !== 'exists');
+  if(!todo.length){ toast('Nothing left to import.', 'err'); return; }
+  if(!confirm(`Import ${todo.length} file${todo.length === 1 ? '' : 's'} into ${folderPath(destId)} as Published?\n\nThey will skip review and approval. Keep this page open until it finishes.`)) return;
+  const opts = {
+    project: document.getElementById('imProject').value,
+    destProject: projectNameForFolder(destId),
+    department: document.getElementById('imDepartment').value,
+    category: document.getElementById('imCategory').value,
+    revision: document.getElementById('imRevision').value.trim(),
+    skipDup: document.getElementById('imSkipDup').checked
+  };
+  imRunning = true; imStopRequested = false;
+  window.addEventListener('beforeunload', imBeforeUnload);
+  ['imStartBtn', 'imClearBtn'].forEach(id => document.getElementById(id).disabled = true);
+  document.getElementById('imStopBtn').classList.remove('hidden');
+  document.getElementById('imProgWrap').classList.remove('hidden');
+  const folderCache = new Map(), nameCache = new Map();
+  let done = 0, failed = 0, existed = 0, finished = 0, pos = 0;
+  const progress = () => {
+    const pct = Math.round(finished / todo.length * 100);
+    document.getElementById('imProgBar').style.width = pct + '%';
+    document.getElementById('imProgText').textContent = `${finished} of ${todo.length} processed · ${done} published · ${existed} already there · ${failed} failed`;
+  };
+  progress();
+  const worker = async () => {
+    while(pos < todo.length && !imStopRequested){
+      const i = todo[pos++];
+      try {
+        const folderId = await imEnsureFolder(destId, imDirsFor(imItems[i]), folderCache);
+        if(opts.skipDup){
+          const names = await imExistingNames(folderId, nameCache);
+          if(names.has(imItems[i].name.toLowerCase())){ imSetState(i, 'exists'); existed++; finished++; progress(); continue; }
+          names.add(imItems[i].name.toLowerCase()); // guards against the same name twice in one run
+        }
+        imSetState(i, 'uploading', { pct: 0 });
+        const docId = await imUploadOne(i, folderId, opts);
+        imSetState(i, 'done', { docId }); done++;
+      } catch(err) {
+        imSetState(i, 'error', { error: err && err.code === 'storage/canceled' ? 'Stopped' : (err && err.message) || String(err) }); failed++;
+      }
+      finished++; progress();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  imRunning = false;
+  window.removeEventListener('beforeunload', imBeforeUnload);
+  ['imStartBtn', 'imClearBtn'].forEach(id => document.getElementById(id).disabled = false);
+  document.getElementById('imStopBtn').classList.add('hidden');
+  const msg = `${imStopRequested ? 'Import stopped' : 'Import finished'}: ${done} published${existed ? `, ${existed} already there` : ''}${failed ? `, ${failed} failed` : ''}.`;
+  toast(msg + (failed ? ' Click Start import again to retry the failed ones.' : ''), failed ? 'err' : 'ok');
+  document.getElementById('imProgText').textContent = msg;
+}
+function stopImport(){
+  if(!imRunning) return;
+  imStopRequested = true;
+  toast('Stopping after the files currently uploading…', 'ok');
+}
+function clearImport(){
+  if(imRunning) return;
+  imItems = [];
+  document.getElementById('imPicked').textContent = 'Nothing chosen yet.';
+  document.getElementById('imProgWrap').classList.add('hidden');
+  imRenderPreview();
+}
+function imBeforeUnload(e){ e.preventDefault(); e.returnValue = 'An import is still running.'; return e.returnValue; }

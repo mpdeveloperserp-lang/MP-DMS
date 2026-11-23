@@ -327,6 +327,11 @@
   .modal-overlay.active{display:flex;}
   .modal{background:#fff; border-radius:14px; width:100%; max-width:560px; box-shadow:0 30px 70px -20px rgba(0,0,0,.4); animation:pop .16s ease;}
   .modal.wide{max-width:760px;}
+  .im-check{display:flex; gap:8px; align-items:center; font-size:13px; margin-top:8px; cursor:pointer;}
+  .im-check input{width:auto; margin:0;}
+  .im-st{font-size:12.5px;} .im-st.ok{color:var(--teal, #12806A); font-weight:600;} .im-st.err{color:var(--red);} .im-st.skip{color:var(--text-muted);} .im-st.run{color:var(--gold, #B85A10); font-weight:600;}
+  .modal.nudge{animation:nudge .28s ease;}
+  @keyframes nudge{0%,100%{transform:scale(1);}40%{transform:scale(1.015);}70%{transform:scale(.995);}}
   @keyframes pop{from{opacity:0; transform:translateY(8px) scale(.98);} to{opacity:1; transform:translateY(0) scale(1);}}
   .modal-head{display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid var(--border);}
   .modal-head h3{font-size:16px;}
@@ -758,6 +763,57 @@
           <div class="field"><label>Total Files</label><div style="font-size:15px; font-weight:700; color:var(--gold-bright); padding-top:6px;" id="mfTotal">0</div></div>
           <div class="field" style="display:flex; align-items:flex-end;"><button class="btn btn-primary" style="width:auto;" id="mfGoBtn" onclick="runMoveFiles()">Go</button></div>
         </div>
+      </div>
+    </div>
+
+    <!-- ---------------- IMPORT OLD DOCUMENTS VIEW (admin) ---------------- -->
+    <div class="view" id="importDocsView">
+      <div class="view-head"><h2>Import Old Documents</h2></div>
+      <div class="view-sub">Bring old files into DMS as <b>Published</b>. They skip review and approval, and no one is notified. Choose a folder from your computer and its subfolders are recreated in DMS. The Audit Trail shows each file as <i>Imported as Published</i> by you.</div>
+      <div class="card panel" style="margin-bottom:14px;">
+        <div class="upload-grid" style="max-width:none;">
+          <div class="field"><label>Import into (DMS folder) <span style="color:var(--red);">*</span></label><select id="imDest" onchange="imRenderPreview()"></select></div>
+          <div class="field"><label>Files from your computer <span style="color:var(--red);">*</span></label>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-outline-orange btn-sm" onclick="document.getElementById('imDirInput').click()">&#128193; Choose a folder&hellip;</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('imFileInput').click()">Choose files&hellip;</button>
+            </div>
+            <input type="file" id="imDirInput" webkitdirectory directory multiple hidden onchange="imFilesChosen(this)">
+            <input type="file" id="imFileInput" multiple hidden onchange="imFilesChosen(this)">
+            <div class="fm-muted" style="font-size:12px; margin-top:6px;" id="imPicked">Nothing chosen yet.</div>
+          </div>
+          <div class="field"><label>Project</label><select id="imProject" onchange="imRenderPreview()"><option value="">(Taken from the DMS folder)</option></select></div>
+          <div class="field"><label>Department</label><select id="imDepartment"><option value="">(Leave blank)</option></select></div>
+          <div class="field"><label>Document Category</label><select id="imCategory"><option value="">(Leave blank)</option></select></div>
+          <div class="field"><label>Revision</label><input type="text" id="imRevision" placeholder="Optional, e.g. R0"></div>
+          <div class="field"><label>Drawing / Document No.</label>
+            <select id="imDocNo" onchange="imRenderPreview()">
+              <option value="prefix">Start of the file name (up to the first space)</option>
+              <option value="name">Whole file name (without extension)</option>
+              <option value="blank">Leave blank</option>
+            </select></div>
+        </div>
+        <label class="im-check"><input type="checkbox" id="imKeepTop" checked onchange="imRenderPreview()"> Create the chosen folder itself inside the DMS folder (untick to put its contents straight in)</label>
+        <label class="im-check"><input type="checkbox" id="imSkipDup" checked> Skip files already in the same DMS folder with the same file name (safe to run again)</label>
+        <label class="im-check"><input type="checkbox" id="imIgnoreLimits" onchange="imRenderPreview()"> Ignore the file-type and size limits in Set Parameter for this import</label>
+      </div>
+      <div class="card panel hidden" id="imSummaryCard" style="margin-bottom:14px;">
+        <div id="imSummary" style="font-size:13.5px;"></div>
+        <div class="hidden" id="imProgWrap" style="margin-top:12px;">
+          <div style="height:8px; background:var(--bg); border-radius:6px; overflow:hidden;"><div id="imProgBar" style="height:100%; width:0; background:var(--gold-bright, #E8892B); transition:width .2s;"></div></div>
+          <div class="fm-muted" style="font-size:12px; margin-top:6px;" id="imProgText"></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <button class="btn btn-primary" style="width:auto;" id="imStartBtn" onclick="startImport()">Start import</button>
+          <button class="btn btn-ghost hidden" id="imStopBtn" onclick="stopImport()">Stop</button>
+          <button class="btn btn-ghost" id="imClearBtn" onclick="clearImport()">Clear</button>
+        </div>
+      </div>
+      <div class="card hidden" id="imTableCard">
+        <table>
+          <thead><tr><th style="width:50px;">#</th><th>File &rarr; DMS location</th><th style="width:90px;">Size</th><th style="width:200px;">Status</th></tr></thead>
+          <tbody id="imTableBody"></tbody>
+        </table>
       </div>
     </div>
 
@@ -1542,6 +1598,7 @@ const SUBVIEW_GROUPS = {
       ['rootFolderView', 'Root Folder'],
       ['setParamView', 'Set Parameter'],
       ['emailConfigView', 'Email Configuration'],
+      ['importDocsView', 'Import Old Documents'],
       ['moveFilesView', 'Move File Location'],
       ['transferRightsView', 'Transfer Rights']
     ]}
@@ -1631,8 +1688,22 @@ function closeCreateUserModal(){
   if(hasData && !confirm('You have unsaved information. Are you sure you want to cancel?')) return;
   closeModal('createUserModalOverlay');
 }
+// Clicking outside a pop-up no longer closes it (so typed data isn't lost).
+// The box gives a small nudge instead; close with ×, Cancel or the Esc key.
 document.querySelectorAll('.modal-overlay').forEach(ov => {
-  ov.addEventListener('click', e => { if(e.target===ov) ov.classList.remove('active'); });
+  ov.addEventListener('click', e => {
+    if(e.target!==ov) return;
+    const box = ov.querySelector('.modal'); if(!box) return;
+    box.classList.remove('nudge'); void box.offsetWidth; box.classList.add('nudge');
+  });
+});
+document.addEventListener('keydown', e => {
+  if(e.key!=='Escape') return;
+  const open = [...document.querySelectorAll('.modal-overlay.active')];
+  if(!open.length) return;
+  const top = open[open.length-1];
+  const x = top.querySelector('.modal-close');
+  if(x) x.click(); else top.classList.remove('active'); // × runs any "unsaved changes" check
 });
 
 /* ============================================================
@@ -1776,11 +1847,11 @@ function handleUpload(ev){
 </script>
 <!-- APP_BUILD: bump this (and the same value at the top of both .js files) on every release.
      The ?v= makes browsers fetch the matching files instead of an old cached copy. -->
-<script src="app-workflow.js?v=2026.11.21-3"></script>
-<script src="app-files.js?v=2026.11.21-3"></script>
+<script src="app-workflow.js?v=2026.11.21-5"></script>
+<script src="app-files.js?v=2026.11.21-5"></script>
 <script>
 (function checkBuild(){
-  var want = '2026.11.21-3';
+  var want = '2026.11.21-5';
   var wf = window.__BUILD_WORKFLOW, fl = window.__BUILD_FILES;
   if(wf === want && fl === want) return;
   // An old cached app-workflow.js / app-files.js was loaded: offer a clean reload instead of running mismatched code.
