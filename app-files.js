@@ -1,4 +1,4 @@
-window.__BUILD_FILES = '2026.11.21-5'; // must match APP_BUILD in index.html
+window.__BUILD_FILES = '2026.11.23-1'; // must match APP_BUILD in index.html
 /* ============================================================
    FILE MANAGER MODULE  (app-files.js)
    IN4Suite-style document file manager, layered on the existing
@@ -486,7 +486,7 @@ function renderFmTree(){
   if(!el) return;
   if(!foldersLoaded){ el.innerHTML = '<div class="master-empty">Loading&hellip;</div>'; return; }
   if(foldersData.length === 0){
-    el.innerHTML = `<div class="master-empty">No folders yet.${fmIsAdmin() ? `<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openCreateFolderModal(null)">+ Create root folder</button>` : ''}</div>`;
+    el.innerHTML = `<div class="master-empty">No folders yet.${fmIsAdmin() ? `<br>Root folders are created from projects.<br><button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="switchView('projectsMasterView')">+ Add a project</button>` : ''}</div>`;
     return;
   }
   const vis = computeVisibleFolders();
@@ -871,6 +871,7 @@ function allocateFolderNo(){
   }));
 }
 function openCreateFolderModal(parentId){
+  if(!parentId){ toast('Root folders are created from projects. Add the project in Masters → Project Master and its folder appears automatically.', 'err'); return; }
   fmFolderModal = { mode: 'create', parentId: parentId || null };
   document.getElementById('cfTitle').textContent = parentId ? 'New Subfolder' : 'Create Root Folder';
   document.getElementById('cfParent').textContent = parentId ? 'Inside: ' + folderPath(parentId) : 'Top level (root folder)';
@@ -903,6 +904,7 @@ function submitCreateFolder(){
   const name = document.getElementById('cfName').value.trim();
   const issue = folderNameIssue(name, m.parentId, m.folderId);
   if(issue){ toast(issue, 'err'); return; }
+  if(m.mode !== 'rename' && !m.parentId){ toast('Root folders are created from projects (Masters → Project Master).', 'err'); return; }
   const btn = document.getElementById('cfConfirmBtn');
   btn.disabled = true;
   const now = firebase.firestore.FieldValue.serverTimestamp();
@@ -1067,18 +1069,50 @@ function renderRootFolderView(){
   if(!body || !currentUser) return;
   const roots = childFolders(null);
   if(!foldersLoaded){ body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Loading&hellip;</b></div></td></tr>`; return; }
-  if(roots.length === 0){ body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128193;</div><b>No root folders yet</b><div>Create the top-level folders (e.g. ASSETS, Design, ENGG, Finance, HR, LEGAL) to start organising files.</div></div></td></tr>`; return; }
+  const others = roots.filter(f => !linkedProjectMaster(f));
+  const note = document.getElementById('rootNonProjectNote');
+  if(note){
+    note.classList.toggle('hidden', !others.length);
+    note.innerHTML = others.length ? `<b>${others.length} root folder${others.length === 1 ? ' is' : 's are'} not a project:</b> ${others.map(f => escapeHtml(f.name)).join(', ')}.
+      <div style="margin-top:6px; font-size:13px;">Only project folders should be at the top. For each one, use <b>&#10142; Move into project</b> to put it inside a project folder, or delete it once it's empty. Nothing is moved or deleted automatically, so no files are lost.</div>` : '';
+  }
+  if(roots.length === 0){ body.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="ic">&#128193;</div><b>No root folders yet</b><div>Add your projects in Masters &rarr; Project Master; each one gets its root folder automatically.</div></div></td></tr>`; return; }
+  roots.sort((a, b) => (linkedProjectMaster(a) ? 0 : 1) - (linkedProjectMaster(b) ? 0 : 1) || a.name.localeCompare(b.name));
   body.innerHTML = roots.map(f => `<tr>
     <td><span class="drawing-code">${fmtFolderNo(f.folderNo)}</span></td>
-    <td><span style="display:inline-flex; align-items:center; gap:8px;">${FOLDER_SVG}${escapeHtml(f.name)}${linkedProjectMaster(f) ? ' <span class="fm-tag project">Project</span>' : ''}</span></td>
+    <td><span style="display:inline-flex; align-items:center; gap:8px;">${FOLDER_SVG}${escapeHtml(f.name)}${linkedProjectMaster(f) ? ' <span class="fm-tag project">Project</span>' : ' <span class="fm-tag restricted">Not a project</span>'}</span></td>
     <td>${descendantIds(f.id).length}</td>
     <td><span class="fm-tag ${isFolderRestricted(f.id) ? 'restricted' : 'open'}">${isFolderRestricted(f.id) ? 'Restricted' : 'Open'}</span></td>
     <td>${escapeHtml(f.createdByName || '—')}</td>
     <td style="text-align:right; white-space:nowrap;">
       <button class="icon-btn-sm" onclick="openFmFolder('${f.id}')" title="Open">&#128194;</button>
+      ${linkedProjectMaster(f) ? '' : `<button class="btn btn-outline-orange btn-sm" onclick="openMoveRootModal('${f.id}')">&#10142; Move into project</button>
       <button class="icon-btn-sm" onclick="openRenameFolderModal('${f.id}')" title="Rename">&#9999;&#65039;</button>
-      <button class="icon-btn-sm" onclick="deleteFolder('${f.id}')" title="Delete">&#128465;&#65039;</button>
+      <button class="icon-btn-sm" onclick="deleteFolder('${f.id}')" title="Delete">&#128465;&#65039;</button>`}
     </td></tr>`).join('');
+}
+// Put a hand-made (non-project) root folder inside a project folder.
+let mrFolderId = null;
+function openMoveRootModal(id){
+  const f = foldersById.get(id); if(!f || linkedProjectMaster(f)) return;
+  const targets = childFolders(null).filter(x => linkedProjectMaster(x)).sort((a, b) => a.name.localeCompare(b.name));
+  if(!targets.length){ toast('There are no project folders yet. Add a project in Masters → Project Master first.', 'err'); return; }
+  mrFolderId = id;
+  document.getElementById('mrInfo').innerHTML = `Folder: <b>${escapeHtml(f.name)}</b> &middot; ${descendantIds(id).length} subfolder(s)`;
+  document.getElementById('mrTarget').innerHTML = targets.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  openModal('moveRootModalOverlay');
+}
+function submitMoveRoot(){
+  const f = foldersById.get(mrFolderId); if(!f) return;
+  const targetId = document.getElementById('mrTarget').value;
+  if(!targetId) return;
+  const clash = folderNameIssue(f.name, targetId, f.id);
+  if(clash){ toast(`${foldersById.get(targetId).name} already has a folder called "${f.name}". Rename one of them first.`, 'err'); return; }
+  const btn = document.getElementById('mrConfirmBtn'); btn.disabled = true;
+  db.collection('folders').doc(f.id).update({ parentId: targetId, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    .then(() => { fmExpanded.add(targetId); toast(`Moved: ${folderPath(f.id)}`, 'ok'); closeModal('moveRootModalOverlay'); })
+    .catch(err => toast('Could not move: ' + err.message, 'err'))
+    .finally(() => { btn.disabled = false; });
 }
 
 /* ============================================================
