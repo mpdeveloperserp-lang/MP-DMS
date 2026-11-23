@@ -1,4 +1,4 @@
-window.__BUILD_WORKFLOW = '2026.11.23-1'; // must match APP_BUILD in index.html
+window.__BUILD_WORKFLOW = '2026.11.23-2'; // must match APP_BUILD in index.html
 /* ============================================================
    HELPERS
 ============================================================ */
@@ -1728,8 +1728,10 @@ function listenProjectStaffing(){
 function canAccessPage(pageKey){
   if(!currentUser) return false;
   if(currentUser.role === 'admin') return true;
-  if(!PAGE_ACCESS_ITEMS.some(i => i.key === pageKey)) return true;
+  const item = PAGE_ACCESS_ITEMS.find(i => i.key === pageKey);
+  if(!item) return true;
   const userAccess = userPageAccessData[currentUser.uid];
+  if(item.userOnly) return !!(userAccess && userAccess.pages && userAccess.pages[pageKey] === true);
   if(userAccess && userAccess.pages && (pageKey in userAccess.pages)){
     return userAccess.pages[pageKey] !== false;
   }
@@ -1806,6 +1808,8 @@ function renderUserAccessPanel(){
   const userOverrides = (userPageAccessData[uid] && userPageAccessData[uid].pages) || {};
   const myRoles = getUserRoles(user);
   function roleDefaultFor(pageKey){
+    const it = PAGE_ACCESS_ITEMS.find(i => i.key === pageKey);
+    if(it && it.userOnly) return false;
     if(myRoles.length === 0) return true;
     return myRoles.some(roleId => {
       const roleAccess = pageAccessData[roleId];
@@ -1814,15 +1818,18 @@ function renderUserAccessPanel(){
       return roleAccess.pages[pageKey] !== false;
     });
   }
-  const pageRows = PAGE_ACCESS_ITEMS.map(item => {
+  const accessRow = item => {
     const hasOverride = item.key in userOverrides;
     const roleDefault = roleDefaultFor(item.key);
     const effective = hasOverride ? userOverrides[item.key] !== false : roleDefault;
-    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:5px;">
-      <input type="checkbox" class="ua-page-cb" value="${item.key}" style="width:auto;" ${effective ? 'checked' : ''}>
-      <span>${escapeHtml(item.label)}${hasOverride ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}</span>
+    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:5px 4px;cursor:pointer;border-radius:5px;">
+      <input type="checkbox" class="ua-page-cb" value="${item.key}" style="width:auto; margin-top:3px;" ${effective ? 'checked' : ''}>
+      <span>${escapeHtml(item.label)}${hasOverride && !item.userOnly ? '<span class="master-inuse-tag" style="margin-left:6px;">Custom</span>' : ''}
+        ${item.hint ? `<div style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(item.hint)}</div>` : ''}</span>
     </label>`;
-  }).join('');
+  };
+  const pageRows = PAGE_ACCESS_ITEMS.filter(i => i.group === 'page').map(accessRow).join('');
+  const actionRows = PAGE_ACCESS_ITEMS.filter(i => i.group === 'action').map(accessRow).join('');
 
   panel.innerHTML = `
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
@@ -1838,10 +1845,17 @@ function renderUserAccessPanel(){
         ${projectCheckboxes || '<div class="master-empty">No projects in Masters &rarr; Project Master yet.</div>'}
       </div>
     </div>
-    <div class="card" style="padding:16px; margin-bottom:16px;">
-      <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:10px;">Page Access</div>
-      <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">Pages this user can see. <b>Custom</b> means a per-user override is already set; everything else follows their role(s) by default.</div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:4px;">${pageRows}</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+      <div class="card" style="padding:16px;">
+        <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:10px;">Page Access</div>
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">Pages this user can see in the sidebar. <b>Custom</b> means a per-user setting; the rest follow their role(s).</div>
+        ${pageRows}
+      </div>
+      <div class="card" style="padding:16px;">
+        <div style="font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:10px;">Actions in Folders</div>
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">What this user can do inside the folders they're allowed to open (folder Permissions decide which folders). Viewing and downloading files needs no tick.</div>
+        ${actionRows}
+      </div>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
       <button class="btn btn-teal" id="uaSaveBtn" onclick="saveUserAccess('${uid}')">Save</button>
@@ -1857,6 +1871,8 @@ function saveUserAccess(uid){
   const selectedProjects = Array.from(document.querySelectorAll('.ua-proj-cb:checked')).map(cb => cb.value);
   const myRoles = [...getUserRoles({ role: user.role, roles: additionalRoles })];
   function roleDefaultFor(pageKey){
+    const it = PAGE_ACCESS_ITEMS.find(i => i.key === pageKey);
+    if(it && it.userOnly) return false;
     if(myRoles.length === 0) return true;
     return myRoles.some(roleId => {
       const roleAccess = pageAccessData[roleId];
