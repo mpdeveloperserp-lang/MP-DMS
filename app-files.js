@@ -1,4 +1,4 @@
-window.__BUILD_FILES = '2026.11.23-2'; // must match APP_BUILD in index.html
+window.__BUILD_FILES = '2026.11.26-2'; // must match APP_BUILD in index.html
 /* ============================================================
    FILE MANAGER MODULE  (app-files.js)
    IN4Suite-style document file manager, layered on the existing
@@ -261,12 +261,14 @@ function goUploadToFolder(folderId){
   sel.value = folderId;
   document.getElementById('uploadFolderPath').textContent = 'Upload to ' + folderPath(folderId);
   onUploadFolderChange();
+  if(typeof refreshCategoryLinks === 'function') refreshCategoryLinks();
   openModal('uploadModalOverlay');
 }
 function closeUploadModal(){
   closeModal('uploadModalOverlay');
   document.getElementById('uploadForm').reset();
   if(typeof resetUploadForm === 'function') resetUploadForm();
+  if(typeof refreshCategoryLinks === 'function') refreshCategoryLinks();
 }
 
 /* ---------------- email (Firebase Trigger Email extension) ---------------- */
@@ -676,9 +678,9 @@ function renderFmFolder(el){
     : 'Document Category workflow';
   const actionLinks = `<div class="fm-actions-links">
       ${!fmIsAdmin() && canCreateSubfolderIn(id) ? `<a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>` : ''}
+      ${access && canImportOldDocs() ? `<a onclick="goImportToFolder('${id}')">Import Old Files</a><span class="sep">|</span>` : ''}
       ${fmIsAdmin() ? `<a onclick="openFolderPermModal('${id}')">Permissions</a><span class="sep">|</span>
       <a onclick="openCreateFolderModal('${id}')">New Subfolder</a><span class="sep">|</span>
-      <a onclick="goImportToFolder('${id}')">Import Old Files</a><span class="sep">|</span>
       <a class="danger" onclick="deleteFolder('${id}')">Delete Folder</a><span class="sep">|</span>` : ''}
       <a onclick="toggleQuickLink('${id}')">${isQuick ? '&#9733; Remove Quick Link' : '&#9734; Add to Quick Links'}</a>
     </div>`;
@@ -1855,6 +1857,10 @@ let imItems = [];          // { file, dirs:[...], name, size, skip:null|reason, 
 let imRunning = false, imStopRequested = false;
 const IM_JUNK = /^(thumbs\.db|desktop\.ini|\.ds_store)$/i;
 
+// Admin always; others need "Import Old Documents" ticked in User Access → Page Access.
+function canImportOldDocs(){
+  return !!currentUser && (fmIsAdmin() || (typeof canAccessPage === 'function' && canAccessPage('importDocsView')));
+}
 function goImportToFolder(folderId){
   switchView('importDocsView');
   populateImportDest();
@@ -1863,7 +1869,7 @@ function goImportToFolder(folderId){
 }
 function populateImportDest(){
   if(!currentUser) return;
-  fillFolderSelect('imDest', folderOptions(false), 'Select a DMS folder&hellip;');
+  fillFolderSelect('imDest', folderOptions(!fmIsAdmin()), 'Select a DMS folder&hellip;');
 }
 function imFmtSize(b){
   if(b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
@@ -2023,7 +2029,8 @@ function imUploadOne(i, folderId, opts){
 }
 async function startImport(){
   if(imRunning) return;
-  if(!fmIsAdmin()){ toast('Only Admin can import old documents.', 'err'); return; }
+  if(!canImportOldDocs()){ toast("You don't have access to Import Old Documents. Ask an Admin (Configurations → User Access).", 'err'); return; }
+  if(!fmIsAdmin() && !canAccessFolder(document.getElementById('imDest').value)){ toast("You don't have access to that folder.", 'err'); return; }
   const destId = document.getElementById('imDest').value;
   if(!destId){ toast('Please choose the DMS folder to import into.', 'err'); return; }
   imRenderPreview();
