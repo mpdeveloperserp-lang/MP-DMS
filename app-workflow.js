@@ -1,4 +1,4 @@
-window.__BUILD_WORKFLOW = '2026.11.23-2'; // must match APP_BUILD in index.html
+window.__BUILD_WORKFLOW = '2026.11.26-2'; // must match APP_BUILD in index.html
 /* ============================================================
    HELPERS
 ============================================================ */
@@ -775,7 +775,8 @@ const MASTER_TYPES = [
     hasSubItems: true, panelId: 'departmentsMasterPanel',
     starter: ['Engineering','Architecture','Planning','QA/QC','Project Management','Management'],
     inUseMessage: 'This department is in use and cannot be deleted.',
-    isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name) },
+    isInUse: item => allDocsSnapshot.some(d => d.department === item.name) || usersData.some(u => u.department === item.name)
+      || mastersData.categoryMasters.some(c => (c.departments || []).includes(item.name)) },
   { key: 'categoryMasters',   label: 'Document Categories',  singular: 'document category',   selects: ['fCategory','filterCategory','imCategory'],
     hasSubItems: true, panelId: 'categoriesMasterPanel',
     starter: ['Structural Drawings','Architectural Drawings','MEP Drawings','Electrical Drawings','HVAC','Landscape','Legal Documents','BOQ','Quality Documents'],
@@ -792,6 +793,7 @@ function listenMasters(){
       mastersData[mt.key] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const topLevel = mastersData[mt.key].filter(it => !it.parentId);
       mt.selects.forEach(selId => populateSelect(selId, topLevel));
+      if(mt.key === 'categoryMasters' || mt.key === 'departmentMasters') refreshCategoryLinks();
       refreshMasterDataPanels();
       if(mt.key === 'categoryMasters' && currentUser && currentUser.role === 'admin') renderWorkflowConfigView();
       if(mt.key === 'projectMasters' && typeof onProjectMastersChanged === 'function') onProjectMastersChanged();
@@ -818,6 +820,65 @@ function populateSelect(selectId, items){
   const placeholder = sel.options[0] && sel.options[0].value === '' ? sel.options[0].outerHTML : '';
   sel.innerHTML = placeholder + items.map(it => `<option>${escapeHtml(it.name)}</option>`).join('');
   if(items.some(it => it.name === prevValue)) sel.value = prevValue;
+}
+
+/* ---------- Document Category ↔ Department ----------
+   A category stores departments: [names]. Empty = used by every department.
+   Department dropdowns filter their paired Category dropdown. */
+const CATEGORY_DEPT_LINKS = [
+  { dept: 'fDepartment', cat: 'fCategory', needDept: true },   // Upload: choose department first
+  { dept: 'imDepartment', cat: 'imCategory' },                   // Import Old Documents
+  { dept: 'filterDepartment', cat: 'filterCategory' }            // All Documents filters
+];
+function categoriesForDepartment(dept){
+  return mastersData.categoryMasters.filter(c => !c.parentId &&
+    (!dept || !(c.departments || []).length || c.departments.includes(dept)));
+}
+function refreshCategorySelect(link){
+  const dSel = document.getElementById(link.dept), cSel = document.getElementById(link.cat);
+  if(!dSel || !cSel) return;
+  const dept = dSel.value, before = cSel.value;
+  if(link.needDept && !dept){
+    cSel.innerHTML = '<option value="">Select department first&hellip;</option>';
+    cSel.disabled = true;
+  } else {
+    cSel.disabled = false;
+    if(link.needDept) cSel.innerHTML = '<option value="">Select document category&hellip;</option>';
+    populateSelect(link.cat, categoriesForDepartment(dept));
+  }
+  if(cSel.value !== before) cSel.dispatchEvent(new Event('change'));
+}
+function refreshCategoryLinks(){ CATEGORY_DEPT_LINKS.forEach(refreshCategorySelect); }
+CATEGORY_DEPT_LINKS.forEach(link => {
+  const d = document.getElementById(link.dept);
+  if(d) d.addEventListener('change', () => refreshCategorySelect(link));
+});
+function categoryDeptChips(item){
+  const ds = item.departments || [];
+  if(!ds.length) return '<span class="fm-muted" style="font-size:11.5px; margin-right:8px;">All departments</span>';
+  return `<span style="display:flex; flex-wrap:wrap; gap:4px; margin-right:8px; max-width:340px;">${ds.map(d => `<span class="master-inuse-tag" style="background:#E8F0FA; color:var(--navy, #1F3A68);">${escapeHtml(d)}</span>`).join('')}</span>`;
+}
+let catDeptEditingId = null;
+function openCategoryDeptModal(id, nameHint){
+  const item = mastersData.categoryMasters.find(c => c.id === id);
+  const name = item ? item.name : (nameHint || '');
+  const current = new Set((item && item.departments) || []);
+  const depts = mastersData.departmentMasters.filter(d => !d.parentId);
+  if(!depts.length){ toast('Add departments in Masters → Department Master first.', 'err'); return; }
+  catDeptEditingId = id;
+  document.getElementById('cdInfo').innerHTML = `Category: <b>${escapeHtml(name)}</b>`;
+  document.getElementById('cdList').innerHTML = depts.map(d => `<label style="display:flex; align-items:center; gap:8px; padding:5px 2px; cursor:pointer;">
+      <input type="checkbox" class="cd-cb" value="${escapeHtml(d.name)}" style="width:auto;" ${current.has(d.name) ? 'checked' : ''}> ${escapeHtml(d.name)}</label>`).join('');
+  openModal('catDeptModalOverlay');
+}
+function saveCategoryDepartments(){
+  if(!catDeptEditingId) return;
+  const departments = [...document.querySelectorAll('.cd-cb:checked')].map(c => c.value);
+  const btn = document.getElementById('cdSaveBtn'); btn.disabled = true;
+  db.collection('categoryMasters').doc(catDeptEditingId).update({ departments })
+    .then(() => { toast(departments.length ? `Linked to ${departments.length} department(s).` : 'Shown for all departments.', 'ok'); closeModal('catDeptModalOverlay'); })
+    .catch(err => toast('Could not save: ' + err.message, 'err'))
+    .finally(() => { btn.disabled = false; });
 }
 
 function renderSingleMasterPanel(mt){
@@ -851,7 +912,9 @@ function renderMasterItemRow(mt, item, all){
       <span onclick="${mt.hasSubItems ? `toggleMasterExpand('${mt.key}','${item.id}')` : ''}" style="cursor:${mt.hasSubItems?'pointer':'default'}; display:flex; align-items:center; gap:6px; flex:1;">
         ${mt.hasSubItems ? `<span class="master-chevron">${chevron}</span>` : ''}${escapeHtml(item.name)}${children.length ? `<span class="master-subcount">${children.length}</span>` : ''}${inUse ? '<span class="master-inuse-tag">In use</span>' : ''}
       </span>
+      ${mt.key === 'categoryMasters' && !item.parentId ? categoryDeptChips(item) : ''}
       <div class="master-row-actions">
+        ${mt.key === 'categoryMasters' && !item.parentId ? `<button class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:12px;" onclick="openCategoryDeptModal('${item.id}')" title="Which departments use this category">&#127970; Departments</button>` : ''}
         <button class="icon-btn-sm" onclick="startMasterEdit('${mt.key}','${item.id}')" title="${inUse?'In use — rename disabled':'Edit'}" ${inUse?'disabled':''}>&#9999;&#65039;</button>
         <button class="icon-btn-sm" onclick="removeMasterEntry('${mt.key}','${item.id}')" title="${inUse?'In use — delete disabled':'Delete'}" ${inUse?'disabled':''}>&#128465;&#65039;</button>
       </div>
@@ -923,7 +986,10 @@ function submitCreateMasterModal(){
   const existing = mastersData[typeKey].some(it => !it.parentId && it.name.toLowerCase() === name.toLowerCase());
   if(existing){ toast('That entry already exists.', 'err'); return; }
   db.collection(typeKey).add({ name, parentId: null, createdAt: firebase.firestore.FieldValue.serverTimestamp() })
-    .then(() => { toast('Created.', 'ok'); closeModal('createMasterModalOverlay'); })
+    .then(ref => {
+      toast('Created.', 'ok'); closeModal('createMasterModalOverlay');
+      if(typeKey === 'categoryMasters') openCategoryDeptModal(ref.id, name); // pick its departments right away
+    })
     .catch(err => toast('Could not create: ' + err.message, 'err'));
 }
 function addSubMasterEntry(typeKey, parentId){
