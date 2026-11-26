@@ -578,6 +578,7 @@
     <button class="nav-item active" data-view="filesView" onclick="openFmDashboard()"><span class="ic">&#128194;</span> Files<span class="nav-badge hidden" id="queueBadge" title="Files waiting for your review/approval">0</span></button>
     <button class="nav-item" data-view="fmReportsView" onclick="switchView('fmReportsView')"><span class="ic">&#128202;</span> Reports</button>
     <button class="nav-item" data-view="alertsView" onclick="switchView('alertsView')"><span class="ic">&#9888;</span> Alerts</button>
+    <button class="nav-item" data-view="importDocsView" onclick="switchView('importDocsView')"><span class="ic">&#128229;</span> Import Old Docs</button>
     <div class="nav-group-label hidden" id="adminNavGroup">Admin</div>
     <button class="nav-item hidden" id="adminUsersNavBtn" data-view="usersView" onclick="switchView('usersView')"><span class="ic">&#128101;</span> Manage Users</button>
     <button class="nav-item hidden admin-master-nav" data-view="mastersView" onclick="switchView('mastersView')"><span class="ic">&#128451;</span> Masters</button>
@@ -876,7 +877,7 @@
     <!-- ---------------- MANAGE CATEGORIES VIEW (admin only) ---------------- -->
     <div class="view" id="categoriesMasterView">
       <div class="view-head"><h2>Manage Document Categories</h2><button class="btn btn-teal" onclick="openCreateMasterModal('categoryMasters')">+ Create Document Category</button></div>
-      <div class="view-sub">Feeds the Document Category dropdown on Upload and the Documents filter. Click an entry to expand and add sub-items (e.g. document types) under it. Entries in use can't be edited or deleted.</div>
+      <div class="view-sub">Feeds the Document Category dropdown on Upload, Import and the Documents filter. <b>Click &#127970; Departments on a category to choose which departments it belongs to</b>; Upload then shows only the categories of the department picked. A category with no departments set is shown for every department. Click an entry to add sub-items (e.g. document types). Entries in use can't be renamed or deleted.</div>
       <div class="card panel" style="max-width:640px;" id="categoriesMasterPanel"></div>
     </div>
 
@@ -1102,6 +1103,26 @@
 </div>
 
 <!-- ---------------- CREATE PROJECT/DEPARTMENT/CATEGORY MODAL (admin only) ---------------- -->
+<!-- ---------------- CATEGORY → DEPARTMENTS MODAL ---------------- -->
+<div class="modal-overlay" id="catDeptModalOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Departments for this Category</h3><button class="modal-close" onclick="closeModal('catDeptModalOverlay')">&times;</button></div>
+    <div class="modal-body">
+      <div class="auth-hint" style="margin:0 0 12px;" id="cdInfo"></div>
+      <div style="display:flex; gap:12px; margin-bottom:8px; font-size:12.5px;">
+        <a onclick="document.querySelectorAll('.cd-cb').forEach(c=>c.checked=true)">Tick all</a>
+        <a onclick="document.querySelectorAll('.cd-cb').forEach(c=>c.checked=false)">Clear</a>
+      </div>
+      <div id="cdList" style="max-height:320px; overflow:auto; border:1px solid var(--border); border-radius:8px; padding:6px 10px;"></div>
+      <div class="fm-muted" style="font-size:12.5px; margin-top:10px;">Leave everything unticked to show this category for <b>all</b> departments.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('catDeptModalOverlay')">Cancel</button>
+      <button class="btn btn-teal" id="cdSaveBtn" onclick="saveCategoryDepartments()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="createMasterModalOverlay">
   <div class="modal">
     <div class="modal-head"><h3 id="createMasterModalTitle">Create Entry</h3><button class="modal-close" onclick="closeModal('createMasterModalOverlay')">&times;</button></div>
@@ -1376,6 +1397,7 @@ const PAGE_ACCESS_ITEMS = [
   { key: 'filesView', label: 'Files', group: 'page' },
   { key: 'fmReportsView', label: 'Reports', group: 'page' },
   { key: 'alertsView', label: 'Alerts', group: 'page' },
+  { key: 'importDocsView', label: 'Import Old Documents', hint: 'publishes old files straight away, without review/approval (off unless ticked)', group: 'page', userOnly: true },
   { key: 'uploadView', label: 'Upload documents', hint: 'the + Upload button in folders they can open', group: 'action' },
   { key: 'createFolder', label: 'Create subfolders', hint: 'New Subfolder inside folders they can open (never at the top level)', group: 'action', userOnly: true }
 ];
@@ -1619,7 +1641,6 @@ const SUBVIEW_GROUPS = {
       ['rootFolderView', 'Root Folder'],
       ['setParamView', 'Set Parameter'],
       ['emailConfigView', 'Email Configuration'],
-      ['importDocsView', 'Import Old Documents'],
       ['moveFilesView', 'Move File Location'],
       ['transferRightsView', 'Transfer Rights']
     ]}
@@ -1868,11 +1889,11 @@ function handleUpload(ev){
 </script>
 <!-- APP_BUILD: bump this (and the same value at the top of both .js files) on every release.
      The ?v= makes browsers fetch the matching files instead of an old cached copy. -->
-<script src="app-workflow.js?v=2026.11.23-2"></script>
-<script src="app-files.js?v=2026.11.23-2"></script>
+<script src="app-workflow.js?v=2026.11.26-2"></script>
+<script src="app-files.js?v=2026.11.26-2"></script>
 <script>
 (function checkBuild(){
-  var want = '2026.11.23-2';
+  var want = '2026.11.26-2';
   var wf = window.__BUILD_WORKFLOW, fl = window.__BUILD_FILES;
   if(wf === want && fl === want) return;
   // An old cached app-workflow.js / app-files.js was loaded: offer a clean reload instead of running mismatched code.
